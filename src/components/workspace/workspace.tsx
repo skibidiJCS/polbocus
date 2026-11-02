@@ -5,6 +5,7 @@ import { formatBytes, formatRange, formatTimestamp } from "@/lib/time";
 import type { VideoSummary } from "@/types/video";
 import { ApiError, deleteVideo, fetchVideos, retryVideo, searchMoments, uploadVideo, type SearchMode } from "./client-api";
 import { DeleteDialog } from "./delete-dialog";
+import { DropOverlay } from "./drop-overlay";
 import { Player, type PlayerHandle } from "./player";
 import { MomentsPanel, SearchForm, type Results as PanelResults } from "./search-panels";
 import { isInProgress, statusDetail, VideoLibrary, type UploadingItem } from "./video-library";
@@ -52,7 +53,6 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
   const [pending, setPending] = useState<PendingFile | null>(null);
   const [upload, setUpload] = useState<UploadingItem | null>(null);
   const [toast, setToast] = useState<Toast | null>(null);
-  const [dragging, setDragging] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [retrying, setRetrying] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<VideoSummary | null>(null);
@@ -137,32 +137,6 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
     pendingUrl.current = url;
     setPending({ file: candidate, url, duration: null });
   }, [apiKeyConfigured, clearPending, maxUploadBytes, notify, upload]);
-
-  // Drop a file anywhere in the window.
-  useEffect(() => {
-    let depth = 0;
-    const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
-    const enter = (event: DragEvent) => { if (!hasFiles(event)) return; depth++; setDragging(true); };
-    const over = (event: DragEvent) => { if (hasFiles(event)) event.preventDefault(); };
-    const leave = (event: DragEvent) => { if (!hasFiles(event)) return; depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
-    const drop = (event: DragEvent) => {
-      if (!hasFiles(event)) return;
-      event.preventDefault();
-      depth = 0;
-      setDragging(false);
-      chooseFile(event.dataTransfer?.files[0]);
-    };
-    window.addEventListener("dragenter", enter);
-    window.addEventListener("dragover", over);
-    window.addEventListener("dragleave", leave);
-    window.addEventListener("drop", drop);
-    return () => {
-      window.removeEventListener("dragenter", enter);
-      window.removeEventListener("dragover", over);
-      window.removeEventListener("dragleave", leave);
-      window.removeEventListener("drop", drop);
-    };
-  }, [chooseFile]);
 
   function selectVideo(id: string) {
     clearPending();
@@ -261,7 +235,7 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
   let queryStatus: string;
   if (!selected) queryStatus = "Add a video to begin.";
   else if (pending) queryStatus = "Confirm the upload first.";
-  else if (selected.status === "ready") queryStatus = mode === "all" ? "Mixed results lean visual — for something said, search what’s said." : "Each search is one TwelveLabs request.";
+  else if (selected.status === "ready") queryStatus = mode === "all" ? "For something someone said, choose What’s said." : "Each search is one TwelveLabs request.";
   else if (selected.status === "failed") queryStatus = "Indexing failed — retry it from the library.";
   else queryStatus = `Search opens when indexing finishes. ${statusDetail(selected, now)}.`;
 
@@ -335,16 +309,16 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
               <div className={`segment-line ${activeSegment ? "is-visible" : ""}`} aria-live="polite">
                 {activeSegment && (
                   <>
-                    <span>Moment {String(activeIndex! + 1).padStart(2, "0")}</span>
+                    <span>Playing moment {activeIndex! + 1}</span>
                     <span className="mono">{formatRange(activeSegment.startSeconds, activeSegment.endSeconds)}</span>
-                    <button className="link-button" onClick={() => playerRef.current?.seekTo(activeSegment.startSeconds)}>Replay segment</button>
+                    <button className="btn-text" onClick={() => playerRef.current?.seekTo(activeSegment.startSeconds)}>Replay</button>
                   </>
                 )}
               </div>
             </>
           ) : (
             <div className="welcome">
-              <h1>Drop a video <em>anywhere.</em></h1>
+              <h1>Find any moment in a video.</h1>
               <p>Then describe a moment in it — something seen, or something said — and jump straight there.</p>
               <button className="button-solid" onClick={() => inputRef.current?.click()} disabled={!apiKeyConfigured}>Choose a file</button>
               <p className="welcome-fine">
@@ -374,9 +348,7 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
         )}
       </main>
 
-      <div className={`drop-veil ${dragging ? "is-on" : ""}`} aria-hidden="true">
-        <p>Release to add this video</p>
-      </div>
+      <DropOverlay onFile={chooseFile} enabled={apiKeyConfigured} />
 
       <div className="toast-region" aria-live="polite">
         {toast && (

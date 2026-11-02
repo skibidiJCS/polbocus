@@ -6,11 +6,11 @@ import type { SearchSegment } from "@/types/video";
 import type { SearchMode } from "./client-api";
 
 export const searchModes: { value: SearchMode; label: string; hint: string }[] = [
-  { value: "all", label: "everything", hint: "What is seen, heard, and said" },
-  { value: "visual", label: "what’s seen", hint: "Only what appears on screen" },
-  { value: "speech", label: "what’s said", hint: "Only spoken words" },
+  { value: "all", label: "Everything", hint: "What is seen, heard, and said" },
+  { value: "visual", label: "What’s seen", hint: "Only what appears on screen" },
+  { value: "speech", label: "What’s said", hint: "Only spoken words" },
 ];
-const examples = ["someone drops their phone", "a person walks through a doorway", "outdoors, at night", "someone mentions the deadline"];
+const examples = ["someone drops their phone", "a person walks through a doorway", "an outdoor scene at night", "someone mentions the deadline"];
 
 export interface Results {
   id: number;
@@ -33,9 +33,13 @@ export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mod
   error: string | null;
 }) {
   return (
-    <form className={`query ${canSearch ? "" : "is-disabled"} ${searching ? "is-searching" : ""}`} onSubmit={onSubmit} role="search">
-      <div className="query-line">
-        <label htmlFor="moment-query" className="query-lead">Find the moment</label>
+    <form className={`search ${canSearch ? "" : "is-disabled"} ${searching ? "is-searching" : ""}`} onSubmit={onSubmit} role="search">
+      <div className="search-field">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="M16 16l4 4" />
+        </svg>
+        <label htmlFor="moment-query" className="sr-only">Describe a moment</label>
         <input
           ref={inputRef}
           id="moment-query"
@@ -43,33 +47,35 @@ export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mod
           onChange={(event) => onQuery(event.target.value)}
           maxLength={500}
           disabled={!canSearch}
-          placeholder={canSearch ? "someone drops their phone" : "once a video is ready"}
+          placeholder={canSearch ? "Describe a moment, like “someone drops their phone”" : "Search opens when the video is ready"}
           autoComplete="off"
           spellCheck={false}
         />
-        <button type="submit" className="query-go" disabled={!canSearch || searching || !query.trim()}>
-          {searching ? "Searching" : "Search ↵"}
+        <button type="submit" className="btn btn-primary btn-sm" disabled={!canSearch || searching || !query.trim()}>
+          {searching ? "Searching…" : "Search"}
         </button>
-        <span className="query-rule" aria-hidden="true" />
+        <span className="search-progress" aria-hidden="true" />
       </div>
-      <div className="query-meta">
-        <div className="modes" role="radiogroup" aria-label="Search in">
-          <span className="faint">in</span>
+      <div className="search-meta">
+        <div className="segmented" role="radiogroup" aria-label="Search in">
           {searchModes.map((option) => (
             <button key={option.value} type="button" role="radio" aria-checked={mode === option.value} title={option.hint} className={mode === option.value ? "is-on" : ""} onClick={() => onMode(option.value)}>
               {option.label}
             </button>
           ))}
         </div>
-        <p className="query-status">{status}</p>
+        <p className="search-status">{status}</p>
       </div>
       {canSearch && (
-        <div className="examples">
-          <span className="faint">Examples</span>
-          {examples.map((text) => (
-            <button type="button" key={text} onClick={() => onQuery(text)}>{text}</button>
+        <p className="search-examples">
+          <span>Try</span>
+          {examples.map((text, index) => (
+            <span key={text}>
+              <button type="button" onClick={() => onQuery(text)}>{text}</button>
+              {index < examples.length - 1 && <span className="sep" aria-hidden="true">·</span>}
+            </span>
           ))}
-        </div>
+        </p>
       )}
       {error && <p className="inline-error" role="alert">{error}</p>}
     </form>
@@ -89,7 +95,7 @@ export function MomentsPanel({ results, searching, ready, activeIndex, hoverInde
     <section className={`moments ${searching ? "is-loading" : ""}`} aria-label="Matching moments" aria-busy={searching}>
       <header className="moments-head">
         <h2>Moments</h2>
-        {results && <span className="mono faint">{results.segments.length}</span>}
+        {results && <span className="moments-count">{results.segments.length}</span>}
       </header>
       {results ? (
         results.segments.length ? (
@@ -106,11 +112,6 @@ export function MomentsPanel({ results, searching, ready, activeIndex, hoverInde
                     aria-pressed={index === activeIndex}
                     title={segment.rank !== undefined ? `TwelveLabs rank ${segment.rank} (1 = most relevant). Not a confidence score.` : undefined}
                   >
-                    <span className="moment-index">{String(index + 1).padStart(2, "0")}</span>
-                    <span className="moment-body">
-                      <span className="moment-time">{formatRange(segment.startSeconds, segment.endSeconds)}</span>
-                      {segment.transcription && <span className="moment-quote">“{segment.transcription}”</span>}
-                    </span>
                     <span className="moment-thumb">
                       <span className="moment-thumb-fallback">{formatTimestamp(segment.startSeconds)}</span>
                       {segment.thumbnailUrl && (
@@ -118,6 +119,11 @@ export function MomentsPanel({ results, searching, ready, activeIndex, hoverInde
                         <img src={segment.thumbnailUrl} alt="" loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} />
                       )}
                     </span>
+                    <span className="moment-body">
+                      <span className="moment-time">{formatRange(segment.startSeconds, segment.endSeconds)}</span>
+                      {segment.transcription && <span className="moment-quote">“{segment.transcription}”</span>}
+                    </span>
+                    <span className="moment-index">{index + 1}</span>
                   </button>
                 </li>
               );
@@ -125,19 +131,18 @@ export function MomentsPanel({ results, searching, ready, activeIndex, hoverInde
           </ol>
         ) : (
           <div className="moments-empty">
-            <p className="serif">Nothing matched “{results.query}”.</p>
-            <p>Try describing what’s visible or said in other words{results.mode !== "all" ? ", or search everything" : ""}.</p>
+            <p>No moments matched “{results.query}”.</p>
+            <p className="muted">Try other words{results.mode !== "all" ? ", or search everything" : ""}.</p>
           </div>
         )
       ) : (
         <div className="moments-empty">
-          <p className="serif">{ready ? "Moments you find will gather here." : "Nothing to search yet."}</p>
-          {ready && <p>Click one to play it from that point.</p>}
+          <p className="muted">{ready ? "Search to find moments. Click one to play it." : "Results appear here once the video is ready."}</p>
         </div>
       )}
       {results?.notes.map((note) => <p key={note} className="moments-note">{note}</p>)}
       {results && results.segments.length > 0 && (
-        <p className="moments-foot">Ordered by TwelveLabs relevance rank, most relevant first. Ranks are not confidence scores.</p>
+        <p className="moments-note">Ordered by TwelveLabs relevance, best first. Not a confidence score.</p>
       )}
     </section>
   );

@@ -4,6 +4,7 @@ import { upload, uploadPresigned } from "@vercel/blob/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, formatElapsed, formatRange, formatTimestamp } from "@/lib/time";
 import { ApiError, type SearchMode } from "./client-api";
+import { DropOverlay } from "./drop-overlay";
 import { Player, type PlayerHandle } from "./player";
 import { MomentsPanel, SearchForm, type Results } from "./search-panels";
 
@@ -55,7 +56,6 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
   const [local, setLocal] = useState<LocalFile | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: "empty" });
   const [now, setNow] = useState(() => Date.now());
-  const [dragging, setDragging] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
@@ -142,32 +142,6 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
     setLocal({ file, url: URL.createObjectURL(file), duration: null });
     setStage({ kind: "confirm" });
   }, [busy, reset]);
-
-  // Drop a file anywhere in the window.
-  useEffect(() => {
-    let depth = 0;
-    const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
-    const enter = (event: DragEvent) => { if (!hasFiles(event)) return; depth++; setDragging(true); };
-    const over = (event: DragEvent) => { if (hasFiles(event)) event.preventDefault(); };
-    const leave = (event: DragEvent) => { if (!hasFiles(event)) return; depth = Math.max(0, depth - 1); if (!depth) setDragging(false); };
-    const drop = (event: DragEvent) => {
-      if (!hasFiles(event)) return;
-      event.preventDefault();
-      depth = 0;
-      setDragging(false);
-      choose(event.dataTransfer?.files[0]);
-    };
-    window.addEventListener("dragenter", enter);
-    window.addEventListener("dragover", over);
-    window.addEventListener("dragleave", leave);
-    window.addEventListener("drop", drop);
-    return () => {
-      window.removeEventListener("dragenter", enter);
-      window.removeEventListener("dragover", over);
-      window.removeEventListener("dragleave", leave);
-      window.removeEventListener("drop", drop);
-    };
-  }, [choose]);
 
   async function watchIndexing(signal: AbortSignal) {
     let failures = 0;
@@ -271,154 +245,129 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
 
   const percent = stage.kind === "uploading" && stage.total > 0 ? Math.min(100, Math.floor((stage.loaded / stage.total) * 100)) : 0;
   let statusLine = "";
-  if (stage.kind === "uploading") statusLine = `Uploading · ${percent}%`;
-  else if (stage.kind === "processing") statusLine = `TwelveLabs is receiving it · ${formatElapsed(now - stage.since)}`;
-  else if (stage.kind === "indexing") statusLine = `Indexing${stage.providerStatus !== "indexing" ? ` · ${stage.providerStatus}` : ""} · ${formatElapsed(now - stage.since)}`;
+  if (stage.kind === "confirm") statusLine = "Not uploaded yet";
+  else if (stage.kind === "uploading") statusLine = `Uploading ${percent}%`;
+  else if (stage.kind === "processing") statusLine = `Sending to TwelveLabs · ${formatElapsed(now - stage.since)}`;
+  else if (stage.kind === "indexing") statusLine = `Indexing${stage.providerStatus !== "indexing" ? ` (${stage.providerStatus})` : ""} · ${formatElapsed(now - stage.since)}`;
   else if (stage.kind === "ready") statusLine = "Ready to search";
-  else if (stage.kind === "failed") statusLine = "Failed";
+  else if (stage.kind === "failed") statusLine = "Couldn’t be indexed";
 
-  let queryStatus: string;
-  if (stage.kind === "empty") queryStatus = "Add a video to begin.";
-  else if (stage.kind === "confirm") queryStatus = "Upload it first.";
-  else if (ready) queryStatus = mode === "all" ? "Mixed results lean visual — for something said, search what’s said." : "Each search is one TwelveLabs request.";
-  else if (stage.kind === "failed") queryStatus = "This video couldn’t be indexed.";
-  else queryStatus = `Search opens when indexing finishes. ${statusLine}.`;
+  let queryStatus = "";
+  if (ready) queryStatus = mode === "all" ? "For something someone said, choose What’s said." : "Each search is one TwelveLabs request.";
+  else if (busy) queryStatus = "Opens when indexing finishes.";
 
   const durationWarning = local?.duration != null
     ? local.duration < 4 ? "TwelveLabs needs at least 4 seconds of video." : local.duration > 4 * 3600 ? "TwelveLabs accepts up to 4 hours." : null
     : null;
+  const meta = local ? [local.duration ? formatTimestamp(local.duration) : null, formatBytes(local.file.size)].filter(Boolean).join(" · ") : "";
+  const tone = stage.kind === "ready" ? "is-ready" : stage.kind === "failed" ? "is-failed" : busy ? "is-busy" : "";
 
   return (
-    <div className="shell">
-      <aside className="rail">
-        <div className="rail-head">
-          <span className="wordmark">footage</span>
-          <button className="add-video" onClick={() => (local ? reset() : inputRef.current?.click())}>
-            <span aria-hidden="true">+</span> {local ? "New video" : "Add video"}
-          </button>
-        </div>
-        <input ref={inputRef} className="sr-only" type="file" accept={ACCEPT} aria-label="Choose a video" onChange={(event) => { choose(event.target.files?.[0]); event.target.value = ""; }} />
-        <div className="rail-label"><span>This visit</span></div>
-        {local ? (
-          <ol className="library">
-            <li className="library-item is-selected">
-              <div className="library-select">
-                <span className="library-index">01</span>
-                <span className="library-body">
-                  <span className="library-name" title={local.file.name}>{local.file.name}</span>
-                  <span className="library-meta">{[local.duration ? formatTimestamp(local.duration) : null, formatBytes(local.file.size)].filter(Boolean).join(" · ")}</span>
-                  {stage.kind !== "confirm" && (
-                    <span className={`library-status ${stage.kind === "failed" ? "status-failed" : stage.kind === "ready" ? "is-ready" : "status-indexing"}`}>
-                      <span className="status-dot" aria-hidden="true" />{statusLine}
-                    </span>
-                  )}
-                  {stage.kind === "uploading" && <span className="upload-line"><span style={{ transform: `scaleX(${percent / 100})` }} /></span>}
-                </span>
-              </div>
-            </li>
-          </ol>
-        ) : (
-          <p className="rail-empty">Nothing yet.</p>
-        )}
-        <p className="rail-note">Nothing is kept. Your video is deleted from TwelveLabs when you leave or start a new one.</p>
-        <p className="rail-foot">
-          <span className="conn-dot is-on" aria-hidden="true" />
-          Signed in · <button className="link-button" onClick={signOut}>Sign out</button>
-        </p>
-      </aside>
+    <div className="app">
+      <header className="topbar">
+        <span className="wordmark">footage</span>
+        <nav className="topbar-actions">
+          {local && <button className="btn btn-ghost btn-sm" onClick={reset}>New video</button>}
+          <button className="btn-text" onClick={signOut}>Sign out</button>
+        </nav>
+      </header>
+      <input ref={inputRef} className="sr-only" type="file" accept={ACCEPT} aria-label="Choose a video" onChange={(event) => { choose(event.target.files?.[0]); event.target.value = ""; }} />
 
-      <main className="stage">
-        <section className="stage-main" aria-label="Video">
-          {!local ? (
-            <div className="welcome">
-              <h1>Drop a video <em>anywhere.</em></h1>
-              <p>Then describe a moment in it — something seen, or something said — and jump straight there. Nothing is kept after you leave.</p>
-              <button className="button-solid" onClick={() => inputRef.current?.click()}>Choose a file</button>
-              <p className="welcome-fine">MP4 · MOV · M4V · WebM · MKV &nbsp;—&nbsp; up to 4 GB &nbsp;—&nbsp; 4 seconds to 4 hours<br />The video is sent to TwelveLabs to be indexed, and deleted when you leave.</p>
-            </div>
-          ) : (
-            <>
-              <header className="stage-head">
-                <h1 title={local.file.name}>{local.file.name}</h1>
-                <p className={`stage-status ${ready ? "status-ready" : stage.kind === "failed" ? "status-failed" : stage.kind === "confirm" ? "" : "status-indexing"}`}>
-                  {busy && <span className="status-dot" aria-hidden="true" />}
-                  {stage.kind === "confirm" ? "Not uploaded yet" : statusLine}
-                </p>
-              </header>
-              <Player
-                ref={playerRef}
-                src={local.url}
-                label={local.file.name}
-                fallbackDuration={local.duration}
-                segments={results?.segments ?? []}
-                activeIndex={activeIndex}
-                hoverIndex={hoverIndex}
-                onHover={setHoverIndex}
-                onSelect={playSegment}
-                mediaError={mediaError}
-                onMediaError={setMediaError}
-                onDuration={(duration) => setLocal((current) => (current ? { ...current, duration } : current))}
+      {!local ? (
+        <main className="page page-empty">
+          <section className="dropzone">
+            <h1>Find any moment in a video.</h1>
+            <p className="lede">Describe something you see or hear, and jump straight to it.</p>
+            <button className="dropzone-target" onClick={() => inputRef.current?.click()}>
+              <span className="dropzone-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 15V4" /><path d="M7.5 8.5 12 4l4.5 4.5" /><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />
+                </svg>
+              </span>
+              <span className="dropzone-title">Drop a video here, or <u>choose a file</u></span>
+              <span className="dropzone-sub">MP4, MOV, M4V, WebM or MKV · up to 4 GB · 4 seconds to 4 hours</span>
+            </button>
+          </section>
+        </main>
+      ) : (
+        <main className="page workbench">
+          <section className="viewer" aria-label="Video">
+            <header className="viewer-head">
+              <h1 title={local.file.name}>{local.file.name}</h1>
+              <p className={`status ${tone}`}>
+                <span className="status-dot" aria-hidden="true" />
+                <span>{statusLine}</span>
+                {meta && <span className="status-meta">{meta}</span>}
+              </p>
+            </header>
+            <Player
+              ref={playerRef}
+              src={local.url}
+              label={local.file.name}
+              fallbackDuration={local.duration}
+              segments={results?.segments ?? []}
+              activeIndex={activeIndex}
+              hoverIndex={hoverIndex}
+              onHover={setHoverIndex}
+              onSelect={playSegment}
+              mediaError={mediaError}
+              onMediaError={setMediaError}
+              onDuration={(duration) => setLocal((current) => (current ? { ...current, duration } : current))}
+            />
+            {stage.kind === "uploading" && (
+              <div className="bar" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
+                <span style={{ transform: `scaleX(${percent / 100})` }} />
+              </div>
+            )}
+            {stage.kind === "confirm" && (
+              <div className="callout">
+                <p>This video will be sent to TwelveLabs to be indexed. It’s deleted when you leave this page or start a new video.{durationWarning && <span className="warn"> {durationWarning}</span>}</p>
+                <div className="callout-actions">
+                  <button className="btn btn-text" onClick={reset}>Cancel</button>
+                  <button className="btn btn-primary" onClick={startUpload} disabled={Boolean(durationWarning)}>Upload and index</button>
+                </div>
+              </div>
+            )}
+            {stage.kind === "failed" && (
+              <div className="callout is-error">
+                <p>{stage.message}</p>
+                <div className="callout-actions"><button className="btn btn-ghost" onClick={reset}>Start over</button></div>
+              </div>
+            )}
+            {results && activeIndex !== null && results.segments[activeIndex] && (
+              <div className="segment-line">
+                <span>Playing moment {activeIndex + 1}</span>
+                <span className="mono">{formatRange(results.segments[activeIndex].startSeconds, results.segments[activeIndex].endSeconds)}</span>
+                <button className="btn-text" onClick={() => playerRef.current?.seekTo(results.segments[activeIndex].startSeconds)}>Replay</button>
+              </div>
+            )}
+            {stage.kind !== "confirm" && stage.kind !== "failed" && (
+              <SearchForm
+                inputRef={queryRef}
+                canSearch={ready}
+                searching={searching}
+                query={query}
+                onQuery={(value) => { setQuery(value); queryRef.current?.focus(); }}
+                mode={mode}
+                onMode={setMode}
+                onSubmit={runSearch}
+                status={queryStatus}
+                error={searchError}
               />
-              {stage.kind === "confirm" && (
-                <div className="confirm-bar">
-                  <p className="confirm-text">
-                    The video will be sent to TwelveLabs to be indexed. That copy is deleted when you leave this page or start a new video.
-                    {durationWarning && <span className="is-warning"> {durationWarning}</span>}
-                  </p>
-                  <div className="confirm-actions">
-                    <button className="button-solid" onClick={startUpload} disabled={Boolean(durationWarning)}>Upload &amp; index</button>
-                    <button className="link-button" onClick={reset}>Cancel</button>
-                  </div>
-                </div>
-              )}
-              {stage.kind === "uploading" && (
-                <div className="progress-bar-wide" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
-                  <span style={{ transform: `scaleX(${percent / 100})` }} />
-                </div>
-              )}
-              {stage.kind === "failed" && (
-                <div className="confirm-bar">
-                  <p className="confirm-text is-error">{stage.message}</p>
-                  <div className="confirm-actions"><button className="button-ghost" onClick={reset}>Start over</button></div>
-                </div>
-              )}
-              <div className={`segment-line ${results && activeIndex !== null ? "is-visible" : ""}`} aria-live="polite">
-                {results && activeIndex !== null && results.segments[activeIndex] && (
-                  <>
-                    <span>Moment {String(activeIndex + 1).padStart(2, "0")}</span>
-                    <span className="mono">{formatRange(results.segments[activeIndex].startSeconds, results.segments[activeIndex].endSeconds)}</span>
-                    <button className="link-button" onClick={() => playerRef.current?.seekTo(results.segments[activeIndex].startSeconds)}>Replay segment</button>
-                  </>
-                )}
-              </div>
-            </>
-          )}
-
-          <SearchForm
-            inputRef={queryRef}
-            canSearch={ready}
-            searching={searching}
-            query={query}
-            onQuery={(value) => { setQuery(value); queryRef.current?.focus(); }}
-            mode={mode}
-            onMode={setMode}
-            onSubmit={runSearch}
-            status={queryStatus}
-            error={searchError}
-          />
-        </section>
-
-        {local && (
+            )}
+          </section>
           <MomentsPanel results={results} searching={searching} ready={ready} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} />
-        )}
-      </main>
+        </main>
+      )}
 
-      <div className={`drop-veil ${dragging ? "is-on" : ""}`} aria-hidden="true"><p>Release to add this video</p></div>
+      <footer className="page-foot">Nothing is kept. Videos are deleted from TwelveLabs when you leave this page.</footer>
+
+      <DropOverlay onFile={choose} />
       <div className="toast-region" aria-live="polite">
         {notice && (
           <div className="toast is-error" role="alert">
             <p>{notice}</p>
-            <button className="link-button" onClick={() => setNotice(null)}>Close</button>
+            <button className="btn-text" onClick={() => setNotice(null)}>Dismiss</button>
           </div>
         )}
       </div>

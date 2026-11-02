@@ -34,7 +34,7 @@ export function DeleteDialog({ video, onCancel, onConfirm }: {
       onClick={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}
     >
       <div className="dialog-body">
-        <h2 id="delete-title">Delete <em>{video.originalName}</em>?</h2>
+        <h2 id="delete-title">Delete “{video.originalName}”?</h2>
         {video.hasProviderCopy ? (
           <p>It was sent to TwelveLabs. You can remove it everywhere, or only from this computer. Removing the TwelveLabs copy deletes the uploaded asset and its index entry — that can’t be undone.</p>
         ) : (
@@ -42,13 +42,13 @@ export function DeleteDialog({ video, onCancel, onConfirm }: {
         )}
         {error && <p className="inline-error" role="alert">{error}</p>}
         <div className="dialog-actions">
-          <button className="button-solid is-danger" onClick={() => confirm(true)} disabled={busy} autoFocus>
+          <button className="btn btn-danger" onClick={() => confirm(true)} disabled={busy} autoFocus>
             {busy ? "Deleting…" : video.hasProviderCopy ? "Delete everywhere" : "Delete"}
           </button>
           {video.hasProviderCopy && (
-            <button className="button-ghost" onClick={() => confirm(false)} disabled={busy}>This computer only</button>
+            <button className="btn btn-ghost" onClick={() => confirm(false)} disabled={busy}>This computer only</button>
           )}
-          <button className="link-button" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button className="btn-text" onClick={onCancel} disabled={busy}>Cancel</button>
         </div>
         {video.hasProviderCopy && <p className="dialog-fine">“This computer only” leaves the video in your TwelveLabs index. You can remove it later in the TwelveLabs Playground.</p>}
       </div>

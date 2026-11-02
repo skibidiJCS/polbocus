@@ -12,7 +12,8 @@ export default async function LoginPage() {
   return (
     <main className="login">
       <p className="wordmark">footage</p>
-      <h1>Find the moment.</h1>
+      <h1>Sign in</h1>
+      <p className="lede">This site is private. Enter your password to continue.</p>
       {missing.length ? (
         <div className="login-setup">
           <p>Sign-in isn’t set up yet. In Vercel, open this project’s <strong>Settings → Environment Variables</strong>, add the following, then redeploy:</p>

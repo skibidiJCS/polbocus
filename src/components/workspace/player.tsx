@@ -206,7 +206,7 @@ export function Player({ ref, src, label, fallbackDuration, segments, activeInde
         <div className="ruler-ticks" aria-hidden="true">
           {ticks.map((tick) => (
             <span key={tick.at} className={tick.major ? "tick major" : "tick"} style={{ left: `${(tick.at / duration!) * 100}%` }}>
-              {tick.major && tick.at > 0 && tick.at < duration! - 0.5 && <em>{formatTimestamp(tick.at)}</em>}
+              {tick.major && tick.at > 0 && tick.at < duration! - 0.5 && <span className="tick-label">{formatTimestamp(tick.at)}</span>}
             </span>
           ))}
         </div>
