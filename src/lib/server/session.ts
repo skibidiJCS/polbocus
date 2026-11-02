@@ -47,6 +47,9 @@ export async function startSession(deps: SessionDeps, input: { pathname: unknown
   const filename = typeof input.filename === "string" ? input.filename : "video";
   const now = deps.now ?? Date.now;
 
+  // Look up the index while the upload is checked; the two don't depend on each other.
+  const indexLookup = deps.provider.ensureIndex(signal);
+  indexLookup.catch(() => {});
   const info = await deps.blob.head(pathname);
   if (!info) throw new ServiceError("The upload could not be found. Try again.", 404);
   if (info.size > SESSION_MAX_BYTES) {
@@ -59,7 +62,7 @@ export async function startSession(deps: SessionDeps, input: { pathname: unknown
     throw new ServiceError(`That file isn’t a supported video. Use ${ACCEPTED_FORMATS_LABEL}.`, 415);
   }
 
-  const index = await deps.provider.ensureIndex(signal);
+  const index = await indexLookup;
   const url = await deps.blob.presignGet(pathname, now() + FETCH_URL_LIFETIME_MS);
   const { assetId } = await deps.provider.createAssetFromUrl(url, taggedFilename(filename), signal);
   return { assetId, indexId: index.id, sizeBytes: info.size };

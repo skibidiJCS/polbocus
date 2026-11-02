@@ -19,6 +19,7 @@ const MAX_BYTES = 4_000_000_000;
 
 type Stage =
   | { kind: "empty" }
+  | { kind: "shrinking"; fraction: number }
   | { kind: "uploading"; loaded: number; total: number }
   | { kind: "processing"; since: number }
   | { kind: "indexing"; since: number; providerStatus: string }
@@ -74,9 +75,11 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
   const queryRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<PlayerHandle>(null);
   const searchCount = useRef(0);
+  // A search typed while the video is still being prepared; it runs once ready.
+  const [pending, setPending] = useState<{ text: string; mode: SearchMode } | null>(null);
 
   const ready = stage.kind === "ready";
-  const busy = stage.kind === "uploading" || stage.kind === "processing" || stage.kind === "indexing";
+  const busy = stage.kind === "shrinking" || stage.kind === "uploading" || stage.kind === "processing" || stage.kind === "indexing";
 
   /** Deletes the TwelveLabs copy and any leftover upload. Beacon form survives page unload. */
   const endSession = useCallback((viaBeacon: boolean) => {
@@ -130,6 +133,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
     setHoverIndex(null);
     setMediaError(null);
     setSearchError(null);
+    setPending(null);
   }, [endSession]);
 
 
@@ -173,18 +177,26 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
   }
 
   async function startUpload(local: LocalFile) {
-    const ext = extensionOf(local.file)!;
     const controller = new AbortController();
     work.current = controller;
-    setStage({ kind: "uploading", loaded: 0, total: local.file.size });
     try {
+      // Large, high-resolution files are shrunk to 720p first: far less to upload.
+      let file = local.file;
+      if (file.size >= 25_000_000) {
+        setStage({ kind: "shrinking", fraction: 0 });
+        const { shrinkVideo } = await import("./shrink");
+        file = (await shrinkVideo(file, (fraction) => setStage({ kind: "shrinking", fraction }), controller.signal)) ?? file;
+        if (controller.signal.aborted) return;
+      }
+      const ext = extensionOf(file)!;
+      setStage({ kind: "uploading", loaded: 0, total: file.size });
       const send = presignedUploads ? uploadPresigned : upload;
-      const blob = await send(`sessions/${crypto.randomUUID()}.${ext}`, local.file, {
+      const blob = await send(`sessions/${crypto.randomUUID()}.${ext}`, file, {
         access: "private",
         handleUploadUrl: "/api/session/upload",
         contentType: TYPES[ext],
         // Parallel parts upload faster; each part must be at least 5 MB.
-        multipart: local.file.size > 10_000_000,
+        multipart: file.size > 10_000_000,
         abortSignal: controller.signal,
         onUploadProgress: ({ loaded, total }) => setStage({ kind: "uploading", loaded, total }),
       });
@@ -212,17 +224,23 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
     void startUpload(next);
   }
 
-  async function runSearch(event?: React.FormEvent) {
+  function runSearch(event?: React.FormEvent) {
     event?.preventDefault();
-    const { indexId, indexedAssetId } = session.current;
-    if (!ready || searching || !indexId || !indexedAssetId) return;
     const text = query.trim();
     if (!text) return queryRef.current?.focus();
+    if (busy) return setPending({ text, mode });
+    void search(text, mode);
+  }
+
+  async function search(text: string, mode: SearchMode) {
+    const { indexId, indexedAssetId } = session.current;
+    if (!indexId || !indexedAssetId) return;
     const controller = new AbortController();
     searchAbort.current?.abort();
     searchAbort.current = controller;
     setSearching(true);
     setSearchError(null);
+    setPending(null);
     try {
       const result = await post<{ segments: Results["segments"]; notes: string[] }>("/api/session/search", {
         indexId, videoId: indexedAssetId, query: text, mode, durationSeconds: local?.duration ?? session.current.durationSeconds ?? null,
@@ -237,6 +255,17 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
     }
   }
 
+  // Run a search typed during preparation as soon as the video is ready.
+  useEffect(() => {
+    if (ready && pending) void search(pending.text, pending.mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- search reads refs and current state
+  }, [ready, pending]);
+
+  // The tab title says when the video is ready, so waiting can happen in another tab.
+  useEffect(() => {
+    document.title = ready ? "Ready · polbocus" : stage.kind === "failed" ? "Failed · polbocus" : "polbocus";
+  }, [ready, stage.kind]);
+
   function playSegment(index: number) {
     if (!results) return;
     setActiveIndex(index);
@@ -249,9 +278,11 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
     window.location.replace("/login");
   }
 
-  const percent = stage.kind === "uploading" && stage.total > 0 ? Math.min(100, Math.floor((stage.loaded / stage.total) * 100)) : 0;
+  const percent = stage.kind === "uploading" && stage.total > 0 ? Math.min(100, Math.floor((stage.loaded / stage.total) * 100))
+    : stage.kind === "shrinking" ? Math.floor(stage.fraction * 100) : 0;
   let statusLine = "";
-  if (stage.kind === "uploading") statusLine = `Uploading ${percent}%`;
+  if (stage.kind === "shrinking") statusLine = `Shrinking ${percent}%`;
+  else if (stage.kind === "uploading") statusLine = `Uploading ${percent}%`;
   else if (stage.kind === "processing") statusLine = `Preparing · ${formatElapsed(now - stage.since)}`;
   else if (stage.kind === "indexing") statusLine = `Indexing · ${formatElapsed(now - stage.since)}`;
   else if (stage.kind === "ready") statusLine = "Ready";
@@ -313,8 +344,8 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
                 }
               }}
             />
-            {stage.kind === "uploading" && (
-              <div className="bar" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
+            {(stage.kind === "uploading" || stage.kind === "shrinking") && (
+              <div className="bar" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label={stage.kind === "shrinking" ? "Shrinking progress" : "Upload progress"}>
                 <span style={{ transform: `scaleX(${percent / 100})` }} />
               </div>
             )}
@@ -333,7 +364,8 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
             {stage.kind !== "failed" && (
               <SearchForm
                 inputRef={queryRef}
-                canSearch={ready}
+                canSearch={ready || busy}
+                waiting={pending ? pending.text : null}
                 searching={searching}
                 query={query}
                 onQuery={(value) => { setQuery(value); queryRef.current?.focus(); }}

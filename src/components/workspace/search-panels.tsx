@@ -19,9 +19,11 @@ export interface Results {
   notes: string[];
 }
 
-export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mode, onMode, onSubmit, error }: {
+export function SearchForm({ inputRef, canSearch, waiting = null, searching, query, onQuery, mode, onMode, onSubmit, error }: {
   inputRef: Ref<HTMLInputElement>;
   canSearch: boolean;
+  /** A query that will run once the video is ready. */
+  waiting?: string | null;
   searching: boolean;
   query: string;
   onQuery: (value: string) => void;
@@ -50,7 +52,7 @@ export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mod
           spellCheck={false}
         />
         <button type="submit" className="btn btn-primary btn-sm" disabled={!canSearch || searching || !query.trim()}>
-          {searching ? "Searching…" : "Search"}
+          {searching ? "Searching…" : waiting ? "Queued" : "Search"}
         </button>
         <span className="search-progress" aria-hidden="true" />
       </div>
@@ -61,6 +63,7 @@ export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mod
           </button>
         ))}
       </div>
+      {waiting && <p className="search-note" aria-live="polite">Searches “{waiting}” as soon as the video is ready.</p>}
       {error && <p className="inline-error" role="alert">{error}</p>}
     </form>
   );
