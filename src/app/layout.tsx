@@ -6,8 +6,8 @@ const sans = Hanken_Grotesk({ subsets: ["latin"], variable: "--font-sans", displ
 const mono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Footage — find the moment",
-  description: "Search your own videos by what happens in them.",
+  title: "polbocus",
+  description: "Find any moment in a video.",
 };
 
 export const viewport: Viewport = { themeColor: "#121110", colorScheme: "dark" };

@@ -188,6 +188,8 @@ export function createTwelveLabsProvider(options: { apiKey: string; settings: Se
     form.append("method", "direct");
     form.append("file", await openAsBlob(file.path, { type: file.mimeType }), file.filename);
     form.append("filename", file.filename);
+    form.append("enable_hls", "false");
+    form.append("enable_thumbnail", "false");
     const asset = await call<{ _id: string }>("POST", "/assets", { form, signal, timeoutMs: DIRECT_UPLOAD_TIMEOUT_MS });
     return { assetId: asset._id };
   }
@@ -286,6 +288,10 @@ export function createTwelveLabsProvider(options: { apiKey: string; settings: Se
       form.append("method", "url");
       form.append("url", url);
       form.append("filename", filename);
+      // The app plays files locally and gets thumbnails from search, so skip TwelveLabs'
+      // optional streaming copy and asset thumbnails.
+      form.append("enable_hls", "false");
+      form.append("enable_thumbnail", "false");
       const asset = await call<{ _id: string }>("POST", "/assets", { form, signal });
       return { assetId: asset._id };
     },

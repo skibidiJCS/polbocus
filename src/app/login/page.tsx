@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/workspace/login-form";
+import { Logo } from "@/components/workspace/logo";
 import { AUTH_COOKIE, isSessionMode, missingAuthSettings, verifySessionToken } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
@@ -11,9 +12,8 @@ export default async function LoginPage() {
   const missing = missingAuthSettings();
   return (
     <main className="login">
-      <p className="wordmark">footage</p>
+      <Logo />
       <h1>Sign in</h1>
-      <p className="lede">This site is private. Enter your password to continue.</p>
       {missing.length ? (
         <div className="login-setup">
           <p>Sign-in isn’t set up yet. In Vercel, open this project’s <strong>Settings → Environment Variables</strong>, add the following, then redeploy:</p>

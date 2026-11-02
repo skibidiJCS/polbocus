@@ -1,4 +1,4 @@
-# Footage Search
+# polbocus
 
 Local, single-user web app: upload a video, let TwelveLabs index it, describe a visual or spoken moment, and click a result to play the video at that timestamp.
 
@@ -40,11 +40,11 @@ A warm "darkroom" palette (bone on soot, moss for matches, ochre for work in pro
 
 ## Online version (Vercel)
 
-On Vercel the app runs as a **signed-in, one-time** tool: you sign in with your password, drop a video, search it, and when you leave the page (close, reload, or "New video") the video is deleted from TwelveLabs. Nothing is kept.
+On Vercel, polbocus runs as a **signed-in, one-time** tool: you sign in with your password, drop a video, search it, and when you leave the page (close, reload, or "New video") the video is deleted from TwelveLabs. Nothing is kept.
 
 ```
-Browser ──(private upload, no size limit)──▶ Vercel Blob (private store)
-Server  ──temporary 2-hour signed link──────▶ TwelveLabs fetches the file → asset → indexed asset
+Browser ──drop starts the upload (parallel parts over 10 MB)──▶ Vercel Blob (private store)
+Server  ──temporary 2-hour signed link──▶ TwelveLabs fetches the file (no HLS copy / asset thumbnails) → asset → indexed asset
 Server  ──deletes the Blob copy as soon as TwelveLabs has it
 Browser ──plays the file from your own computer; search & click-to-seek as locally
 Leave   ──navigator.sendBeacon → delete the TwelveLabs asset (and any leftover upload)

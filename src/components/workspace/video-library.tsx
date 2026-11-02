@@ -70,7 +70,6 @@ export function VideoLibrary({ videos, selectedId, now, upload, onSelect, onRetr
                 <span className="library-meta">{meta}</span>
                 {video.status !== "ready" && (
                   <span className={`library-status status-${video.status}`}>
-                    <span className="status-dot" aria-hidden="true" />
                     {statusDetail(video, now)}
                   </span>
                 )}

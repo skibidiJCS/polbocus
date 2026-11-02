@@ -6,6 +6,7 @@ import type { VideoSummary } from "@/types/video";
 import { ApiError, deleteVideo, fetchVideos, retryVideo, searchMoments, uploadVideo, type SearchMode } from "./client-api";
 import { DeleteDialog } from "./delete-dialog";
 import { DropOverlay } from "./drop-overlay";
+import { Logo } from "./logo";
 import { Player, type PlayerHandle } from "./player";
 import { MomentsPanel, SearchForm, type Results as PanelResults } from "./search-panels";
 import { isInProgress, statusDetail, VideoLibrary, type UploadingItem } from "./video-library";
@@ -232,18 +233,11 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
     ? pending.duration < 4 ? "TwelveLabs needs at least 4 seconds of video." : pending.duration > 4 * 3600 ? "TwelveLabs accepts up to 4 hours." : null
     : null;
 
-  let queryStatus: string;
-  if (!selected) queryStatus = "Add a video to begin.";
-  else if (pending) queryStatus = "Confirm the upload first.";
-  else if (selected.status === "ready") queryStatus = mode === "all" ? "For something someone said, choose What’s said." : "Each search is one TwelveLabs request.";
-  else if (selected.status === "failed") queryStatus = "Indexing failed — retry it from the library.";
-  else queryStatus = `Search opens when indexing finishes. ${statusDetail(selected, now)}.`;
-
   return (
     <div className="shell">
       <aside className="rail">
         <div className="rail-head">
-          <span className="wordmark">footage</span>
+          <Logo />
           <button className="add-video" onClick={() => inputRef.current?.click()} disabled={Boolean(upload)}>
             <span aria-hidden="true">+</span> Add video
           </button>
@@ -256,7 +250,6 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
           <p className="rail-empty">Nothing here yet.</p>
         )}
         <p className="rail-foot">
-          <span className={`conn-dot ${apiKeyConfigured ? "is-on" : ""}`} aria-hidden="true" />
           {apiKeyConfigured ? "TwelveLabs key set" : "No TwelveLabs key"} · local
         </p>
       </aside>
@@ -288,7 +281,6 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
               <header className="stage-head">
                 <h1 title={selected.originalName}>{selected.originalName}</h1>
                 <p className={`stage-status status-${selected.status}`}>
-                  {selected.status !== "ready" && <span className="status-dot" aria-hidden="true" />}
                   {selected.status === "ready" ? `${selected.durationSeconds ? formatTimestamp(selected.durationSeconds) + " · " : ""}${formatBytes(selected.sizeBytes)} · indexed` : statusDetail(selected, now)}
                 </p>
               </header>
@@ -338,13 +330,12 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
             mode={mode}
             onMode={setMode}
             onSubmit={runSearch}
-            status={queryStatus}
             error={searchError}
           />
         </section>
 
         {selected && !pending && (
-          <MomentsPanel results={visible} searching={searching} ready={selected.status === "ready"} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} />
+          <MomentsPanel results={visible} searching={searching} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} />
         )}
       </main>
 

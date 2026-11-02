@@ -2,9 +2,10 @@
 
 import { upload, uploadPresigned } from "@vercel/blob/client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatBytes, formatElapsed, formatRange, formatTimestamp } from "@/lib/time";
+import { formatBytes, formatElapsed, formatRange } from "@/lib/time";
 import { ApiError, type SearchMode } from "./client-api";
 import { DropOverlay } from "./drop-overlay";
+import { Logo } from "./logo";
 import { Player, type PlayerHandle } from "./player";
 import { MomentsPanel, SearchForm, type Results } from "./search-panels";
 
@@ -18,7 +19,6 @@ const MAX_BYTES = 4_000_000_000;
 
 type Stage =
   | { kind: "empty" }
-  | { kind: "confirm" }
   | { kind: "uploading"; loaded: number; total: number }
   | { kind: "processing"; since: number }
   | { kind: "indexing"; since: number; providerStatus: string }
@@ -132,20 +132,13 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
     setSearchError(null);
   }, [endSession]);
 
-  const choose = useCallback((file?: File) => {
-    if (!file) return;
-    if (busy) return setNotice("Wait for the current video to finish, or start over with “New video”.");
-    if (!extensionOf(file)) return setNotice("That isn’t a supported video. Use MP4, MOV, M4V, WebM, or MKV.");
-    if (file.size > MAX_BYTES) return setNotice(`That file is ${formatBytes(file.size)}; the limit is 4 GB.`);
-    reset();
-    setNotice(null);
-    setLocal({ file, url: URL.createObjectURL(file), duration: null });
-    setStage({ kind: "confirm" });
-  }, [busy, reset]);
 
   async function watchIndexing(signal: AbortSignal) {
     let failures = 0;
-    let delay = 2000;
+    const started = Date.now();
+    // Check often so each step is picked up as soon as TwelveLabs finishes it.
+    const nextDelay = () => (Date.now() - started < 3 * 60_000 ? 1500 : 3000);
+    let delay = 1000;
     while (!signal.aborted) {
       await new Promise((resolve) => setTimeout(resolve, delay));
       if (signal.aborted) return;
@@ -166,7 +159,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
           setStage({ kind: "failed", message: status.message ?? "TwelveLabs could not index this video." });
           return;
         }
-        delay = Math.min(delay + 1000, 5000);
+        delay = nextDelay();
       } catch (error) {
         if (signal.aborted) return;
         failures++;
@@ -179,8 +172,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
     }
   }
 
-  async function startUpload() {
-    if (!local) return;
+  async function startUpload(local: LocalFile) {
     const ext = extensionOf(local.file)!;
     const controller = new AbortController();
     work.current = controller;
@@ -191,7 +183,8 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
         access: "private",
         handleUploadUrl: "/api/session/upload",
         contentType: TYPES[ext],
-        multipart: local.file.size > 100_000_000,
+        // Parallel parts upload faster; each part must be at least 5 MB.
+        multipart: local.file.size > 10_000_000,
         abortSignal: controller.signal,
         onUploadProgress: ({ loaded, total }) => setStage({ kind: "uploading", loaded, total }),
       });
@@ -204,6 +197,19 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
       if (controller.signal.aborted) return;
       setStage({ kind: "failed", message: error instanceof Error ? error.message : "Upload failed." });
     }
+  }
+
+  function choose(file?: File) {
+    if (!file) return;
+    if (busy) return setNotice("Wait for the current video to finish, or start over with “New video”.");
+    if (!extensionOf(file)) return setNotice("That isn’t a supported video. Use MP4, MOV, M4V, WebM, or MKV.");
+    if (file.size > MAX_BYTES) return setNotice(`That file is ${formatBytes(file.size)}; the limit is 4 GB.`);
+    reset();
+    setNotice(null);
+    const next = { file, url: URL.createObjectURL(file), duration: null };
+    setLocal(next);
+    // Start right away: the drop zone already says the video goes to TwelveLabs.
+    void startUpload(next);
   }
 
   async function runSearch(event?: React.FormEvent) {
@@ -245,27 +251,18 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
 
   const percent = stage.kind === "uploading" && stage.total > 0 ? Math.min(100, Math.floor((stage.loaded / stage.total) * 100)) : 0;
   let statusLine = "";
-  if (stage.kind === "confirm") statusLine = "Not uploaded yet";
-  else if (stage.kind === "uploading") statusLine = `Uploading ${percent}%`;
-  else if (stage.kind === "processing") statusLine = `Sending to TwelveLabs · ${formatElapsed(now - stage.since)}`;
-  else if (stage.kind === "indexing") statusLine = `Indexing${stage.providerStatus !== "indexing" ? ` (${stage.providerStatus})` : ""} · ${formatElapsed(now - stage.since)}`;
-  else if (stage.kind === "ready") statusLine = "Ready to search";
-  else if (stage.kind === "failed") statusLine = "Couldn’t be indexed";
-
-  let queryStatus = "";
-  if (ready) queryStatus = mode === "all" ? "For something someone said, choose What’s said." : "Each search is one TwelveLabs request.";
-  else if (busy) queryStatus = "Opens when indexing finishes.";
-
-  const durationWarning = local?.duration != null
-    ? local.duration < 4 ? "TwelveLabs needs at least 4 seconds of video." : local.duration > 4 * 3600 ? "TwelveLabs accepts up to 4 hours." : null
-    : null;
-  const meta = local ? [local.duration ? formatTimestamp(local.duration) : null, formatBytes(local.file.size)].filter(Boolean).join(" · ") : "";
+  if (stage.kind === "uploading") statusLine = `Uploading ${percent}%`;
+  else if (stage.kind === "processing") statusLine = `Preparing · ${formatElapsed(now - stage.since)}`;
+  else if (stage.kind === "indexing") statusLine = `Indexing · ${formatElapsed(now - stage.since)}`;
+  else if (stage.kind === "ready") statusLine = "Ready";
+  else if (stage.kind === "failed") statusLine = "Failed";
   const tone = stage.kind === "ready" ? "is-ready" : stage.kind === "failed" ? "is-failed" : busy ? "is-busy" : "";
+  const active = results && activeIndex !== null ? results.segments[activeIndex] : null;
 
   return (
     <div className="app">
       <header className="topbar">
-        <span className="wordmark">footage</span>
+        <Logo />
         <nav className="topbar-actions">
           {local && <button className="btn btn-ghost btn-sm" onClick={reset}>New video</button>}
           <button className="btn-text" onClick={signOut}>Sign out</button>
@@ -277,15 +274,14 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
         <main className="page page-empty">
           <section className="dropzone">
             <h1>Find any moment in a video.</h1>
-            <p className="lede">Describe something you see or hear, and jump straight to it.</p>
             <button className="dropzone-target" onClick={() => inputRef.current?.click()}>
               <span className="dropzone-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 15V4" /><path d="M7.5 8.5 12 4l4.5 4.5" /><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />
                 </svg>
               </span>
-              <span className="dropzone-title">Drop a video here, or <u>choose a file</u></span>
-              <span className="dropzone-sub">MP4, MOV, M4V, WebM or MKV · up to 4 GB · 4 seconds to 4 hours</span>
+              <span className="dropzone-title">Drop a video or <u>choose a file</u></span>
+              <span className="dropzone-sub">Up to 4 GB. Indexed by TwelveLabs and deleted when you leave.</span>
             </button>
           </section>
         </main>
@@ -294,11 +290,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
           <section className="viewer" aria-label="Video">
             <header className="viewer-head">
               <h1 title={local.file.name}>{local.file.name}</h1>
-              <p className={`status ${tone}`}>
-                <span className="status-dot" aria-hidden="true" />
-                <span>{statusLine}</span>
-                {meta && <span className="status-meta">{meta}</span>}
-              </p>
+              <p className={`status ${tone}`} aria-live="polite">{statusLine}</p>
             </header>
             <Player
               ref={playerRef}
@@ -312,36 +304,33 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
               onSelect={playSegment}
               mediaError={mediaError}
               onMediaError={setMediaError}
-              onDuration={(duration) => setLocal((current) => (current ? { ...current, duration } : current))}
+              onDuration={(duration) => {
+                setLocal((current) => (current ? { ...current, duration } : current));
+                if (duration < 4 || duration > 4 * 3600) {
+                  work.current?.abort();
+                  endSession(false);
+                  setStage({ kind: "failed", message: duration < 4 ? "Videos need to be at least 4 seconds long." : "Videos can be up to 4 hours long." });
+                }
+              }}
             />
             {stage.kind === "uploading" && (
               <div className="bar" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
                 <span style={{ transform: `scaleX(${percent / 100})` }} />
               </div>
             )}
-            {stage.kind === "confirm" && (
-              <div className="callout">
-                <p>This video will be sent to TwelveLabs to be indexed. It’s deleted when you leave this page or start a new video.{durationWarning && <span className="warn"> {durationWarning}</span>}</p>
-                <div className="callout-actions">
-                  <button className="btn btn-text" onClick={reset}>Cancel</button>
-                  <button className="btn btn-primary" onClick={startUpload} disabled={Boolean(durationWarning)}>Upload and index</button>
-                </div>
-              </div>
-            )}
             {stage.kind === "failed" && (
               <div className="callout is-error">
                 <p>{stage.message}</p>
-                <div className="callout-actions"><button className="btn btn-ghost" onClick={reset}>Start over</button></div>
+                <button className="btn btn-ghost btn-sm" onClick={reset}>Try another video</button>
               </div>
             )}
-            {results && activeIndex !== null && results.segments[activeIndex] && (
+            {active && (
               <div className="segment-line">
-                <span>Playing moment {activeIndex + 1}</span>
-                <span className="mono">{formatRange(results.segments[activeIndex].startSeconds, results.segments[activeIndex].endSeconds)}</span>
-                <button className="btn-text" onClick={() => playerRef.current?.seekTo(results.segments[activeIndex].startSeconds)}>Replay</button>
+                <span className="mono">{formatRange(active.startSeconds, active.endSeconds)}</span>
+                <button className="btn-text" onClick={() => playerRef.current?.seekTo(active.startSeconds)}>Replay</button>
               </div>
             )}
-            {stage.kind !== "confirm" && stage.kind !== "failed" && (
+            {stage.kind !== "failed" && (
               <SearchForm
                 inputRef={queryRef}
                 canSearch={ready}
@@ -351,16 +340,13 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
                 mode={mode}
                 onMode={setMode}
                 onSubmit={runSearch}
-                status={queryStatus}
                 error={searchError}
               />
             )}
           </section>
-          <MomentsPanel results={results} searching={searching} ready={ready} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} />
+          <MomentsPanel results={results} searching={searching} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} />
         </main>
       )}
-
-      <footer className="page-foot">Nothing is kept. Videos are deleted from TwelveLabs when you leave this page.</footer>
 
       <DropOverlay onFile={choose} />
       <div className="toast-region" aria-live="polite">

@@ -1,8 +1,10 @@
+import { Logo } from "./logo";
+
 /** Shown instead of crashing when the app is missing something it needs. */
 export function HostedNotice({ reason, detail, missing = [] }: { reason: "setup" | "storage"; detail?: string; missing?: string[] }) {
   return (
     <main className="notice-page">
-      <p className="wordmark">footage</p>
+      <Logo />
       {reason === "setup" ? (
         <>
           <h1>Almost there.</h1>

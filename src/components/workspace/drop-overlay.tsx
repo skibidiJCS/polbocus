@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Full-window drop target. Appears while a file is dragged over the page, framed by
@@ -8,6 +8,11 @@ import { useEffect, useState } from "react";
  */
 export function DropOverlay({ onFile, enabled = true }: { onFile: (file: File) => void; enabled?: boolean }) {
   const [active, setActive] = useState(false);
+  // Latest handler without re-subscribing (which would reset the drag counter mid-drag).
+  const onFileRef = useRef(onFile);
+  useEffect(() => {
+    onFileRef.current = onFile;
+  });
 
   useEffect(() => {
     if (!enabled) return;
@@ -34,7 +39,7 @@ export function DropOverlay({ onFile, enabled = true }: { onFile: (file: File) =
       depth = 0;
       setActive(false);
       const file = event.dataTransfer?.files[0];
-      if (file) onFile(file);
+      if (file) onFileRef.current(file);
     };
     const cancel = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -54,7 +59,7 @@ export function DropOverlay({ onFile, enabled = true }: { onFile: (file: File) =
       window.removeEventListener("drop", drop);
       window.removeEventListener("keydown", cancel);
     };
-  }, [enabled, onFile]);
+  }, [enabled]);
 
   return (
     <div className={`drop-overlay ${active ? "is-active" : ""}`} aria-hidden={!active} role="presentation">
@@ -63,9 +68,7 @@ export function DropOverlay({ onFile, enabled = true }: { onFile: (file: File) =
       <span className="vf vf-bl" />
       <span className="vf vf-br" />
       <div className="drop-overlay-body">
-        <span className="drop-overlay-rec"><span /> Ready</span>
         <p className="drop-overlay-title">Drop to upload</p>
-        <p className="drop-overlay-sub">MP4, MOV, M4V, WebM or MKV · up to 4 GB</p>
       </div>
     </div>
   );

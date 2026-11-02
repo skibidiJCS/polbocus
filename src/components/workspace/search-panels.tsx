@@ -10,7 +10,6 @@ export const searchModes: { value: SearchMode; label: string; hint: string }[] =
   { value: "visual", label: "What’s seen", hint: "Only what appears on screen" },
   { value: "speech", label: "What’s said", hint: "Only spoken words" },
 ];
-const examples = ["someone drops their phone", "a person walks through a doorway", "an outdoor scene at night", "someone mentions the deadline"];
 
 export interface Results {
   id: number;
@@ -20,7 +19,7 @@ export interface Results {
   notes: string[];
 }
 
-export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mode, onMode, onSubmit, status, error }: {
+export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mode, onMode, onSubmit, error }: {
   inputRef: Ref<HTMLInputElement>;
   canSearch: boolean;
   searching: boolean;
@@ -29,7 +28,6 @@ export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mod
   mode: SearchMode;
   onMode: (mode: SearchMode) => void;
   onSubmit: (event: React.FormEvent) => void;
-  status: string;
   error: string | null;
 }) {
   return (
@@ -47,7 +45,7 @@ export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mod
           onChange={(event) => onQuery(event.target.value)}
           maxLength={500}
           disabled={!canSearch}
-          placeholder={canSearch ? "Describe a moment, like “someone drops their phone”" : "Search opens when the video is ready"}
+          placeholder={canSearch ? "Describe a moment, like “someone drops their phone”" : "Available once the video is ready"}
           autoComplete="off"
           spellCheck={false}
         />
@@ -56,36 +54,21 @@ export function SearchForm({ inputRef, canSearch, searching, query, onQuery, mod
         </button>
         <span className="search-progress" aria-hidden="true" />
       </div>
-      <div className="search-meta">
-        <div className="segmented" role="radiogroup" aria-label="Search in">
-          {searchModes.map((option) => (
-            <button key={option.value} type="button" role="radio" aria-checked={mode === option.value} title={option.hint} className={mode === option.value ? "is-on" : ""} onClick={() => onMode(option.value)}>
-              {option.label}
-            </button>
-          ))}
-        </div>
-        <p className="search-status">{status}</p>
+      <div className="segmented" role="radiogroup" aria-label="Search in">
+        {searchModes.map((option) => (
+          <button key={option.value} type="button" role="radio" aria-checked={mode === option.value} title={option.hint} className={mode === option.value ? "is-on" : ""} onClick={() => onMode(option.value)}>
+            {option.label}
+          </button>
+        ))}
       </div>
-      {canSearch && (
-        <p className="search-examples">
-          <span>Try</span>
-          {examples.map((text, index) => (
-            <span key={text}>
-              <button type="button" onClick={() => onQuery(text)}>{text}</button>
-              {index < examples.length - 1 && <span className="sep" aria-hidden="true">·</span>}
-            </span>
-          ))}
-        </p>
-      )}
       {error && <p className="inline-error" role="alert">{error}</p>}
     </form>
   );
 }
 
-export function MomentsPanel({ results, searching, ready, activeIndex, hoverIndex, onHover, onPlay }: {
+export function MomentsPanel({ results, searching, activeIndex, hoverIndex, onHover, onPlay }: {
   results: Results | null;
   searching: boolean;
-  ready: boolean;
   activeIndex: number | null;
   hoverIndex: number | null;
   onHover: (index: number | null) => void;
@@ -130,20 +113,12 @@ export function MomentsPanel({ results, searching, ready, activeIndex, hoverInde
             })}
           </ol>
         ) : (
-          <div className="moments-empty">
-            <p>No moments matched “{results.query}”.</p>
-            <p className="muted">Try other words{results.mode !== "all" ? ", or search everything" : ""}.</p>
-          </div>
+          <p className="moments-empty">Nothing matched. Try other words{results.mode !== "all" ? " or search Everything" : ""}.</p>
         )
       ) : (
-        <div className="moments-empty">
-          <p className="muted">{ready ? "Search to find moments. Click one to play it." : "Results appear here once the video is ready."}</p>
-        </div>
+        <p className="moments-empty">Results appear here.</p>
       )}
       {results?.notes.map((note) => <p key={note} className="moments-note">{note}</p>)}
-      {results && results.segments.length > 0 && (
-        <p className="moments-note">Ordered by TwelveLabs relevance, best first. Not a confidence score.</p>
-      )}
     </section>
   );
 }

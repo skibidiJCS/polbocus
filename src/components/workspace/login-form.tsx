@@ -24,8 +24,8 @@ export function LoginForm() {
 
   return (
     <form className="login-form" onSubmit={submit}>
-      <label htmlFor="password" className="field-label">Password</label>
-      <input id="password" className="field" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} autoFocus />
+      <label htmlFor="password" className="sr-only">Password</label>
+      <input id="password" className="field" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} autoFocus />
       {error && <p className="inline-error" role="alert">{error}</p>}
       <button className="btn btn-primary btn-block" disabled={busy || !password}>{busy ? "Checking…" : "Continue"}</button>
     </form>
