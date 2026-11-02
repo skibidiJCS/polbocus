@@ -29,6 +29,19 @@ The key is read only by server code. It is never sent to the browser, never logg
 
 To check the key and index without spending search quota: http://127.0.0.1:3000/api/setup?check=1 (one GET to TwelveLabs).
 
+## Interface
+
+A warm "darkroom" palette (bone on soot, moss for matches, ochre for work in progress, clay for problems), Newsreader for display text, Hanken Grotesk for UI, IBM Plex Mono for timecodes.
+
+- **Timeline ruler** under the player: every match is drawn where it occurs. Hovering a result highlights its span and vice versa; drag or click the ruler to scrub, or focus it and use ←/→ (5 s, Shift for 1 s), Home/End, Space.
+- **Search as a sentence:** "Find the moment …", with *everything / what's seen / what's said* modes and clickable examples.
+- Drop a file anywhere in the window. You confirm (with the TwelveLabs disclosure) before anything uploads.
+- Motion is limited to short fades, rises and growth on the ruler (≈200–500 ms, one easing curve), and is turned off under `prefers-reduced-motion`.
+
+## Why it doesn't run on Vercel
+
+Deploying this repo to Vercel used to return HTTP 500 on every route. The server's startup hook created `data/` and the SQLite file, and Vercel's filesystem is read-only, so the server never finished starting. On Vercel the page now explains this instead of crashing. Making it work there for real would take more than a fix: persistent storage for videos and metadata (for example object storage plus a hosted database), a background job runner (serverless functions stop after each request, and request bodies are limited to a few MB, so uploads would have to go directly to storage), and **authentication**. Without auth, anyone with the URL could upload, search, and delete using your TwelveLabs key. Until then, run it locally.
+
 ## How it works
 
 ```
@@ -124,7 +137,7 @@ src/
     videos/[id]/media/route.ts     GET/HEAD original file with Range support
     search/route.ts                POST search within one video
     setup/route.ts                 Readiness (no secrets); ?check=1 validates key/index
-  components/workspace/            Library, upload confirm/progress, player, search, results, delete dialog
+  components/workspace/            Library, upload confirm/progress, player + timeline ruler, search, results, delete dialog, hosted notice
   lib/segments.ts, lib/time.ts     Result normalisation, timestamp formatting/validation
   lib/server/
     twelvelabs.ts                  TwelveLabs v1.3 REST adapter
