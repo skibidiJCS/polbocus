@@ -8,7 +8,7 @@ import { DeleteDialog } from "./delete-dialog";
 import { DropOverlay } from "./drop-overlay";
 import { Logo } from "./logo";
 import { Player, type PlayerHandle } from "./player";
-import { MomentsPanel, SearchForm, type Results as PanelResults } from "./search-panels";
+import { MomentsPanel, SearchForm, visibleSegments, type Results as PanelResults } from "./search-panels";
 import { isInProgress, statusDetail, VideoLibrary, type UploadingItem } from "./video-library";
 
 const ACCEPT = "video/mp4,video/quicktime,video/x-m4v,video/webm,video/x-matroska,.mp4,.mov,.m4v,.webm,.mkv";
@@ -290,7 +290,7 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
                 src={`/api/videos/${selected.id}/media`}
                 label={selected.originalName}
                 fallbackDuration={selected.durationSeconds}
-                segments={visible?.segments ?? []}
+                segments={visibleSegments(visible)}
                 activeIndex={activeIndex}
                 hoverIndex={hoverIndex}
                 onHover={setHoverIndex}
@@ -335,7 +335,7 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
         </section>
 
         {selected && !pending && (
-          <MomentsPanel results={visible} searching={searching} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} />
+          <MomentsPanel results={visible} searching={searching} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} onExpand={() => setResults((current) => (current ? { ...current, expanded: true } : current))} />
         )}
       </main>
 

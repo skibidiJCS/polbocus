@@ -24,7 +24,8 @@ import {
 export const TWELVELABS_BASE_URL = "https://api.twelvelabs.io/v1.3";
 export const DEFAULT_MODEL_NAME = "marengo3.0";
 const INDEX_SETTING_KEY = "twelvelabs.index_id";
-const INDEX_CACHE_MS = 10 * 60_000;
+// An index's search options never change; this only bounds how stale a deleted index can look.
+const INDEX_CACHE_MS = 60 * 60_000;
 const DEFAULT_TIMEOUT_MS = 60_000;
 const CHUNK_TIMEOUT_MS = 10 * 60_000;
 const DIRECT_UPLOAD_TIMEOUT_MS = 60 * 60_000;
@@ -326,12 +327,15 @@ export function createTwelveLabsProvider(options: { apiKey: string; settings: Se
       return { status: "in_progress", providerStatus: body.status ?? "unknown", durationSeconds };
     },
 
-    async search({ indexId, providerVideoId, query, searchOptions, pageLimit }, signal): Promise<ProviderSearchItem[]> {
+    async search({ indexId, providerVideoId, query, searchOptions, pageLimit, transcriptionOptions }, signal): Promise<ProviderSearchItem[]> {
       const form = new FormData();
       form.append("index_id", indexId);
       form.append("query_text", query);
       for (const option of searchOptions) form.append("search_options", option);
       if (searchOptions.length > 1) form.append("operator", "or");
+      if (transcriptionOptions && searchOptions.includes("transcription")) {
+        for (const option of transcriptionOptions) form.append("transcription_options", option);
+      }
       // Documented filter syntax for restricting results to specific videos.
       form.append("filter", JSON.stringify({ id: [providerVideoId] }));
       form.append("page_limit", String(pageLimit));

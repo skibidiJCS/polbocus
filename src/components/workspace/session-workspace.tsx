@@ -7,7 +7,7 @@ import { ApiError, type SearchMode } from "./client-api";
 import { DropOverlay } from "./drop-overlay";
 import { Logo } from "./logo";
 import { Player, type PlayerHandle } from "./player";
-import { MomentsPanel, SearchForm, type Results } from "./search-panels";
+import { MomentsPanel, SearchForm, visibleSegments, type Results } from "./search-panels";
 
 /**
  * Hosted, one-time use: one video at a time, nothing kept. The file plays from this
@@ -47,6 +47,19 @@ async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promi
   return data;
 }
 
+/** Reads a video's length from its metadata; null if the browser can't tell. */
+function durationOf(url: string) {
+  return new Promise<number | null>((resolve) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    const done = (value: number | null) => { video.removeAttribute("src"); video.load(); resolve(value); };
+    video.onloadedmetadata = () => done(Number.isFinite(video.duration) && video.duration > 0 ? video.duration : null);
+    video.onerror = () => done(null);
+    setTimeout(() => done(null), 5000);
+    video.src = url;
+  });
+}
+
 function extensionOf(file: File) {
   const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (TYPES[ext]) return ext;
@@ -75,6 +88,8 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
   const queryRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<PlayerHandle>(null);
   const searchCount = useRef(0);
+  // Results per query and mode for this video: asking again costs no API request.
+  const searchCache = useRef(new Map<string, { segments: Results["segments"]; notes: string[] }>());
   // A search typed while the video is still being prepared; it runs once ready.
   const [pending, setPending] = useState<{ text: string; mode: SearchMode } | null>(null);
 
@@ -134,14 +149,19 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
     setMediaError(null);
     setSearchError(null);
     setPending(null);
+    searchCache.current.clear();
   }, [endSession]);
 
 
-  async function watchIndexing(signal: AbortSignal) {
+  async function watchIndexing(signal: AbortSignal, duration: number | null) {
     let failures = 0;
-    const started = Date.now();
-    // Check often so each step is picked up as soon as TwelveLabs finishes it.
-    const nextDelay = () => (Date.now() - started < 3 * 60_000 ? 1500 : 3000);
+    let indexing = false;
+    // Preparing takes seconds, so check often. Indexing takes roughly as long as the video,
+    // so the first check waits for half of it and later checks scale with its length:
+    // short clips still turn ready within seconds, long ones don't spend requests.
+    const seconds = duration ?? 60;
+    const nextDelay = (enteredIndexing: boolean) =>
+      !indexing ? 1500 : enteredIndexing ? Math.min(90_000, Math.max(3000, seconds * 500)) : Math.min(10_000, Math.max(2000, seconds * 70));
     let delay = 1000;
     while (!signal.aborted) {
       await new Promise((resolve) => setTimeout(resolve, delay));
@@ -150,6 +170,8 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
         const status = await post<{ stage: string; indexedAssetId?: string; providerStatus?: string; durationSeconds?: number | null; message?: string }>(
           "/api/session/status", session.current, signal);
         failures = 0;
+        const enteredIndexing = !indexing && status.stage === "indexing";
+        if (status.stage === "indexing") indexing = true;
         if (status.indexedAssetId) session.current.indexedAssetId = status.indexedAssetId;
         if (status.durationSeconds) session.current.durationSeconds = status.durationSeconds;
         if (status.stage === "processing") setStage((s) => (s.kind === "processing" ? s : { kind: "processing", since: Date.now() }));
@@ -163,7 +185,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
           setStage({ kind: "failed", message: status.message ?? "TwelveLabs could not index this video." });
           return;
         }
-        delay = nextDelay();
+        delay = nextDelay(enteredIndexing);
       } catch (error) {
         if (signal.aborted) return;
         failures++;
@@ -204,7 +226,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
       setStage({ kind: "processing", since: Date.now() });
       const started = await post<{ assetId: string; indexId: string }>("/api/session/start", { pathname: blob.pathname, filename: local.file.name }, controller.signal);
       session.current = { ...session.current, assetId: started.assetId, indexId: started.indexId };
-      await watchIndexing(controller.signal);
+      await watchIndexing(controller.signal, local.duration ?? (await durationOf(local.url)));
     } catch (error) {
       if (controller.signal.aborted) return;
       setStage({ kind: "failed", message: error instanceof Error ? error.message : "Upload failed." });
@@ -235,19 +257,29 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
   async function search(text: string, mode: SearchMode) {
     const { indexId, indexedAssetId } = session.current;
     if (!indexId || !indexedAssetId) return;
-    const controller = new AbortController();
+    const key = `${mode}\n${text.toLowerCase().replace(/\s+/g, " ")}`;
+    const show = (result: { segments: Results["segments"]; notes: string[] }) => {
+      setResults({ id: ++searchCount.current, query: text, mode, segments: result.segments, notes: result.notes });
+      setActiveIndex(null);
+      setHoverIndex(null);
+    };
+    const cached = searchCache.current.get(key);
     searchAbort.current?.abort();
+    setPending(null);
+    setSearchError(null);
+    if (cached) {
+      setSearching(false);
+      return show(cached);
+    }
+    const controller = new AbortController();
     searchAbort.current = controller;
     setSearching(true);
-    setSearchError(null);
-    setPending(null);
     try {
       const result = await post<{ segments: Results["segments"]; notes: string[] }>("/api/session/search", {
         indexId, videoId: indexedAssetId, query: text, mode, durationSeconds: local?.duration ?? session.current.durationSeconds ?? null,
       }, controller.signal);
-      setResults({ id: ++searchCount.current, query: text, mode, segments: result.segments, notes: result.notes });
-      setActiveIndex(null);
-      setHoverIndex(null);
+      searchCache.current.set(key, { segments: result.segments, notes: result.notes });
+      show(result);
     } catch (error) {
       if (!controller.signal.aborted) setSearchError(error instanceof Error ? error.message : "Search failed.");
     } finally {
@@ -328,7 +360,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
               src={local.url}
               label={local.file.name}
               fallbackDuration={local.duration}
-              segments={results?.segments ?? []}
+              segments={visibleSegments(results)}
               activeIndex={activeIndex}
               hoverIndex={hoverIndex}
               onHover={setHoverIndex}
@@ -376,7 +408,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
               />
             )}
           </section>
-          <MomentsPanel results={results} searching={searching} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} />
+          <MomentsPanel results={results} searching={searching} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} onExpand={() => setResults((current) => (current ? { ...current, expanded: true } : current))} />
         </main>
       )}
 

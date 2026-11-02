@@ -36,7 +36,7 @@ describe("TwelveLabs adapter", () => {
   it("restricts search to the selected provider video with the documented filter", async () => {
     const { calls, fetchImpl } = mockFetch(() => jsonResponse({ data: [{ video_id: "vid-A", start: 1.25, end: 4.5, rank: 1, thumbnail_url: "https://thumb" }] }));
     const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl });
-    const items = await provider.search({ indexId: "idx1", providerVideoId: "vid-A", query: "a dog jumps", searchOptions: ["visual", "transcription"], pageLimit: 20 });
+    const items = await provider.search({ indexId: "idx1", providerVideoId: "vid-A", query: "a dog jumps", searchOptions: ["visual", "transcription"], pageLimit: 20, transcriptionOptions: ["lexical"] });
     expect(calls[0].url).toBe(`${TWELVELABS_BASE_URL}/search`);
     expect(calls[0].method).toBe("POST");
     expect(calls[0].headers["x-api-key"]).toBe(API_KEY);
@@ -45,6 +45,7 @@ describe("TwelveLabs adapter", () => {
     expect(form.get("query_text")).toBe("a dog jumps");
     expect(form.getAll("search_options")).toEqual(["visual", "transcription"]);
     expect(form.get("operator")).toBe("or");
+    expect(form.getAll("transcription_options")).toEqual(["lexical"]);
     expect(JSON.parse(String(form.get("filter")))).toEqual({ id: ["vid-A"] });
     expect(items).toEqual([{ videoId: "vid-A", start: 1.25, end: 4.5, rank: 1, thumbnailUrl: "https://thumb", transcription: null }]);
   });

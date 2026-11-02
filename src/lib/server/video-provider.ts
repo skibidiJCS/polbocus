@@ -12,6 +12,8 @@ export interface ProviderIndex {
 }
 
 export type SearchOption = "visual" | "audio" | "transcription";
+/** How spoken words are matched: exact words ("lexical") or meaning ("semantic"). */
+export type TranscriptionOption = "lexical" | "semantic";
 
 export type AssetState =
   | { status: "processing" }
@@ -53,7 +55,7 @@ export interface VideoProvider {
   findIndexedAssets(assetId: string, indexId: string, signal?: AbortSignal): Promise<string[]>;
   indexAsset(indexId: string, assetId: string, signal?: AbortSignal): Promise<{ indexedAssetId: string }>;
   getIndexedAsset(indexId: string, indexedAssetId: string, signal?: AbortSignal): Promise<IndexedAssetState>;
-  search(input: { indexId: string; providerVideoId: string; query: string; searchOptions: SearchOption[]; pageLimit: number }, signal?: AbortSignal): Promise<ProviderSearchItem[]>;
+  search(input: { indexId: string; providerVideoId: string; query: string; searchOptions: SearchOption[]; pageLimit: number; transcriptionOptions?: TranscriptionOption[] }, signal?: AbortSignal): Promise<ProviderSearchItem[]>;
   deleteIndexedAsset(indexId: string, indexedAssetId: string, signal?: AbortSignal): Promise<"deleted" | "not_found">;
   /** Deletes the asset and (force) any indexed assets that reference it. */
   deleteAsset(assetId: string, signal?: AbortSignal): Promise<"deleted" | "not_found">;

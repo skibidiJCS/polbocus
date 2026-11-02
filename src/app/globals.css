@@ -217,6 +217,7 @@ h1, h2, p { margin: 0; }
 .moments-empty { padding: 8px 2px; font-size: 13.5px; color: var(--muted); transition: opacity 200ms var(--ease); }
 .moments.is-loading .moment-list, .moments.is-loading .moments-empty { opacity: 0.4; }
 .moments-note { margin-top: 12px; font-size: 12px; line-height: 1.6; color: var(--faint); }
+.moments-more { margin-top: 10px; padding: 6px 2px; font-size: 13px; }
 
 /* Drop overlay (viewfinder) -------------------------------------- */
 .drop-overlay {

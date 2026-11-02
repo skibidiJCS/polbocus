@@ -11,12 +11,23 @@ export const searchModes: { value: SearchMode; label: string; hint: string }[] =
   { value: "speech", label: "What’s said", hint: "Only spoken words" },
 ];
 
+// The best few are shown first; the rest are already loaded and cost nothing to reveal.
+const FIRST_SHOWN = 5;
+
 export interface Results {
   id: number;
   query: string;
   mode: SearchMode;
   segments: SearchSegment[];
   notes: string[];
+  /** Whether all results are listed, not just the best few. */
+  expanded?: boolean;
+}
+
+/** The results currently listed (and marked on the timeline). */
+export function visibleSegments(results: { segments: SearchSegment[]; expanded?: boolean } | null) {
+  if (!results) return [];
+  return results.expanded ? results.segments : results.segments.slice(0, FIRST_SHOWN);
 }
 
 export function SearchForm({ inputRef, canSearch, waiting = null, searching, query, onQuery, mode, onMode, onSubmit, error }: {
@@ -69,8 +80,9 @@ export function SearchForm({ inputRef, canSearch, waiting = null, searching, que
   );
 }
 
-export function MomentsPanel({ results, searching, activeIndex, hoverIndex, onHover, onPlay }: {
+export function MomentsPanel({ results, searching, activeIndex, hoverIndex, onHover, onPlay, onExpand }: {
   results: Results | null;
+  onExpand: () => void;
   searching: boolean;
   activeIndex: number | null;
   hoverIndex: number | null;
@@ -81,40 +93,16 @@ export function MomentsPanel({ results, searching, activeIndex, hoverIndex, onHo
     <section className={`moments ${searching ? "is-loading" : ""}`} aria-label="Matching moments" aria-busy={searching}>
       <header className="moments-head">
         <h2>Moments</h2>
-        {results && <span className="moments-count">{results.segments.length}</span>}
+        {results && <span className="moments-count">{visibleSegments(results).length}</span>}
       </header>
       {results ? (
         results.segments.length ? (
-          <ol className="moment-list" key={results.id}>
-            {results.segments.map((segment, index) => {
-              const state = index === activeIndex ? "is-active" : index === hoverIndex ? "is-hover" : "";
-              return (
-                <li key={`${segment.startSeconds}-${index}`} style={{ ["--i" as string]: index }}>
-                  <button
-                    className={`moment ${state}`}
-                    onClick={() => onPlay(index)}
-                    onMouseEnter={() => onHover(index)}
-                    onMouseLeave={() => onHover(null)}
-                    aria-pressed={index === activeIndex}
-                    title={segment.rank !== undefined ? `TwelveLabs rank ${segment.rank} (1 = most relevant). Not a confidence score.` : undefined}
-                  >
-                    <span className="moment-thumb">
-                      <span className="moment-thumb-fallback">{formatTimestamp(segment.startSeconds)}</span>
-                      {segment.thumbnailUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={segment.thumbnailUrl} alt="" loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} />
-                      )}
-                    </span>
-                    <span className="moment-body">
-                      <span className="moment-time">{formatRange(segment.startSeconds, segment.endSeconds)}</span>
-                      {segment.transcription && <span className="moment-quote">“{segment.transcription}”</span>}
-                    </span>
-                    <span className="moment-index">{index + 1}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
+          <>
+            <MomentList key={results.id} segments={visibleSegments(results)} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={onHover} onPlay={onPlay} />
+            {!results.expanded && results.segments.length > FIRST_SHOWN && (
+              <button className="moments-more btn-text" onClick={onExpand}>Show {results.segments.length - FIRST_SHOWN} more</button>
+            )}
+          </>
         ) : (
           <p className="moments-empty">Nothing matched. Try other words{results.mode !== "all" ? " or search Everything" : ""}.</p>
         )
@@ -123,5 +111,46 @@ export function MomentsPanel({ results, searching, activeIndex, hoverIndex, onHo
       )}
       {results?.notes.map((note) => <p key={note} className="moments-note">{note}</p>)}
     </section>
+  );
+}
+
+function MomentList({ segments, activeIndex, hoverIndex, onHover, onPlay }: {
+  segments: SearchSegment[];
+  activeIndex: number | null;
+  hoverIndex: number | null;
+  onHover: (index: number | null) => void;
+  onPlay: (index: number) => void;
+}) {
+  return (
+      <ol className="moment-list">
+        {segments.map((segment, index) => {
+          const state = index === activeIndex ? "is-active" : index === hoverIndex ? "is-hover" : "";
+          return (
+            <li key={`${segment.startSeconds}-${index}`} style={{ ["--i" as string]: index }}>
+              <button
+                className={`moment ${state}`}
+                onClick={() => onPlay(index)}
+                onMouseEnter={() => onHover(index)}
+                onMouseLeave={() => onHover(null)}
+                aria-pressed={index === activeIndex}
+                title={segment.rank !== undefined ? `TwelveLabs rank ${segment.rank} (1 = most relevant). Not a confidence score.` : undefined}
+              >
+                <span className="moment-thumb">
+                  <span className="moment-thumb-fallback">{formatTimestamp(segment.startSeconds)}</span>
+                  {segment.thumbnailUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={segment.thumbnailUrl} alt="" loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} />
+                  )}
+                </span>
+                <span className="moment-body">
+                  <span className="moment-time">{formatRange(segment.startSeconds, segment.endSeconds)}</span>
+                  {segment.transcription && <span className="moment-quote">“{segment.transcription}”</span>}
+                </span>
+                <span className="moment-index">{index + 1}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
   );
 }

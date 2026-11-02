@@ -1,13 +1,14 @@
 import "server-only";
 import { ServiceError } from "./errors";
-import { ProviderError, type SearchOption, type SettingsStore, type VideoProvider } from "./video-provider";
+import { ProviderError, type SearchOption, type SettingsStore, type TranscriptionOption, type VideoProvider } from "./video-provider";
 import { normalizeSegments } from "@/lib/segments";
 import type { SearchSegment } from "@/types/video";
 
 const nowIso = () => new Date().toISOString();
 
 export const MAX_QUERY_LENGTH = 500;
-export const SEARCH_PAGE_LIMIT = 20;
+// One request costs the same however many results it returns; the page shows the best few first.
+export const SEARCH_PAGE_LIMIT = 12;
 
 const noTranscriptionKey = (indexId: string) => `twelvelabs.no_transcription.${indexId}`;
 
@@ -47,8 +48,11 @@ export async function searchIndexedVideo(
     throw new ServiceError(mode === "speech" ? "This video's index does not support spoken-word search. Search everything or visuals instead." : "This index does not support that kind of search.", 400);
   }
   const notes: string[] = [];
+  // In "Everything", speech only counts when the words are actually said; loosely related
+  // speech crowded out what people asked for. "What's said" also matches by meaning.
+  const transcriptionOptions: TranscriptionOption[] = mode === "speech" ? ["lexical", "semantic"] : ["lexical"];
   const run = (searchOptions: SearchOption[]) =>
-    provider.search({ indexId: index.id, providerVideoId: input.providerVideoId, query, searchOptions, pageLimit: SEARCH_PAGE_LIMIT }, signal);
+    provider.search({ indexId: index.id, providerVideoId: input.providerVideoId, query, searchOptions, pageLimit: SEARCH_PAGE_LIMIT, transcriptionOptions }, signal);
 
   let items;
   try {
