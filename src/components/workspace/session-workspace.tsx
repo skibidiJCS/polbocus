@@ -1,6 +1,6 @@
 "use client";
 
-import { upload } from "@vercel/blob/client";
+import { upload, uploadPresigned } from "@vercel/blob/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatBytes, formatElapsed, formatRange, formatTimestamp } from "@/lib/time";
 import { ApiError, type SearchMode } from "./client-api";
@@ -51,7 +51,7 @@ function extensionOf(file: File) {
   return Object.entries(TYPES).find(([, type]) => type === file.type)?.[0] ?? null;
 }
 
-export function SessionWorkspace() {
+export function SessionWorkspace({ presignedUploads }: { presignedUploads: boolean }) {
   const [local, setLocal] = useState<LocalFile | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: "empty" });
   const [now, setNow] = useState(() => Date.now());
@@ -212,7 +212,8 @@ export function SessionWorkspace() {
     work.current = controller;
     setStage({ kind: "uploading", loaded: 0, total: local.file.size });
     try {
-      const blob = await upload(`sessions/${crypto.randomUUID()}.${ext}`, local.file, {
+      const send = presignedUploads ? uploadPresigned : upload;
+      const blob = await send(`sessions/${crypto.randomUUID()}.${ext}`, local.file, {
         access: "private",
         handleUploadUrl: "/api/session/upload",
         contentType: TYPES[ext],

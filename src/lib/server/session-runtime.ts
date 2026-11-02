@@ -16,7 +16,7 @@ export function getSessionDeps(): SessionDeps {
   const key = `${apiKey.length}:${apiKey.slice(-4)}:${indexId ?? ""}`;
   if (cached?.key !== key) cached = { key, provider: createTwelveLabsProvider({ apiKey, settings, configuredIndexId: indexId }) };
   const blob = vercelBlobStore();
-  if (!blob.configured()) throw new ServiceError("Vercel Blob is not connected to this project (BLOB_READ_WRITE_TOKEN is missing).", 503);
+  if (!blob.configured()) throw new ServiceError("Vercel Blob is not connected to this project.", 503);
   return { provider: cached.provider, blob };
 }
 

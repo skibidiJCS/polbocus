@@ -13,10 +13,19 @@ export interface BlobStore {
   list(prefix: string): Promise<{ pathname: string; uploadedAt: Date }[]>;
 }
 
+/**
+ * How the browser uploads: Vercel connects stores with OIDC by default (BLOB_STORE_ID +
+ * BLOB_WEBHOOK_PUBLIC_KEY, no read-write token), which needs presigned uploads.
+ */
+export function blobUploadMethod(): "presigned" | "client-token" | null {
+  if (process.env.BLOB_STORE_ID && process.env.BLOB_WEBHOOK_PUBLIC_KEY) return "presigned";
+  if (process.env.BLOB_READ_WRITE_TOKEN) return "client-token";
+  return null;
+}
+
 export function vercelBlobStore(): BlobStore {
   return {
-    // handleUpload (browser uploads) requires the read-write token; OIDC alone is not enough.
-    configured: () => Boolean(process.env.BLOB_READ_WRITE_TOKEN),
+    configured: () => blobUploadMethod() !== null,
 
     async head(pathname) {
       try {
