@@ -365,7 +365,8 @@ button:disabled { cursor: default; }
 /* Hosted / storage notice ---------------------------------------- */
 .notice-page { max-width: 580px; margin: 16vh auto 80px; padding: 0 24px; }
 .notice-page h1 { margin: 40px 0 18px; font-family: var(--serif); font-weight: 400; font-size: 38px; line-height: 1.1; letter-spacing: -0.015em; }
-.notice-page p { color: var(--ink-soft); font-size: 15px; line-height: 1.7; }
+.notice-page p { margin: 0 0 14px; color: var(--ink-soft); font-size: 15px; line-height: 1.7; }
+.notice-page .wordmark { margin: 0; font-size: 27px; color: var(--ink); }
 .notice-page pre { margin: 18px 0 10px; padding: 16px 18px; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; font-family: var(--mono); font-size: 13px; line-height: 1.8; color: var(--ink); }
 .notice-page code { font-family: var(--mono); font-size: 13px; }
 .notice-foot { font-family: var(--mono); font-size: 12px !important; color: var(--faint) !important; }
