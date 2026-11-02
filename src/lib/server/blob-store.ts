@@ -15,7 +15,8 @@ export interface BlobStore {
 
 export function vercelBlobStore(): BlobStore {
   return {
-    configured: () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || (process.env.VERCEL_OIDC_TOKEN && process.env.BLOB_STORE_ID)),
+    // handleUpload (browser uploads) requires the read-write token; OIDC alone is not enough.
+    configured: () => Boolean(process.env.BLOB_READ_WRITE_TOKEN),
 
     async head(pathname) {
       try {

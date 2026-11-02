@@ -6,7 +6,7 @@ export function HostedNotice({ reason, detail, missing = [] }: { reason: "setup"
       {reason === "setup" ? (
         <>
           <h1>Almost there.</h1>
-          <p>This deployment still needs the following. In Vercel, add them to the project, then redeploy:</p>
+          <p>You’re signed in. Before videos can be uploaded, this deployment needs:</p>
           <ul className="notice-list">{missing.map((item) => <li key={item}>{item}</li>)}</ul>
         </>
       ) : (
