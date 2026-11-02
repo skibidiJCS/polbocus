@@ -1,5 +1,7 @@
 import { HostedNotice } from "@/components/workspace/hosted-notice";
+import { SessionWorkspace } from "@/components/workspace/session-workspace";
 import { Workspace } from "@/components/workspace/workspace";
+import { isSessionMode } from "@/lib/auth";
 import { getServerConfig } from "@/lib/server/config";
 import { getDb } from "@/lib/server/db";
 import { getWorker } from "@/lib/server/runtime";
@@ -9,8 +11,15 @@ import type { VideoSummary } from "@/types/video";
 export const dynamic = "force-dynamic";
 
 export default function Home() {
-  // Serverless hosts have no persistent disk or long-running process, and the app has no login.
-  if (process.env.VERCEL) return <HostedNotice reason="hosted" />;
+  // Hosted: one-time sessions behind sign-in (the proxy has already checked the cookie).
+  if (isSessionMode()) {
+    const missing = [
+      !process.env.TWELVELABS_API_KEY?.trim() && "TWELVELABS_API_KEY",
+      !(process.env.BLOB_READ_WRITE_TOKEN || (process.env.VERCEL_OIDC_TOKEN && process.env.BLOB_STORE_ID)) && "A private Vercel Blob store connected to this project (adds BLOB_READ_WRITE_TOKEN)",
+    ].filter(Boolean) as string[];
+    if (missing.length) return <HostedNotice reason="setup" missing={missing} />;
+    return <SessionWorkspace />;
+  }
   const config = getServerConfig();
   let videos: VideoSummary[];
   try {

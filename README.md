@@ -38,9 +38,33 @@ A warm "darkroom" palette (bone on soot, moss for matches, ochre for work in pro
 - Drop a file anywhere in the window. You confirm (with the TwelveLabs disclosure) before anything uploads.
 - Motion is limited to short fades, rises and growth on the ruler (≈200–500 ms, one easing curve), and is turned off under `prefers-reduced-motion`.
 
-## Why it doesn't run on Vercel
+## Online version (Vercel)
 
-Deploying this repo to Vercel used to return HTTP 500 on every route. The server's startup hook created `data/` and the SQLite file, and Vercel's filesystem is read-only, so the server never finished starting. On Vercel the page now explains this instead of crashing. Making it work there for real would take more than a fix: persistent storage for videos and metadata (for example object storage plus a hosted database), a background job runner (serverless functions stop after each request, and request bodies are limited to a few MB, so uploads would have to go directly to storage), and **authentication**. Without auth, anyone with the URL could upload, search, and delete using your TwelveLabs key. Until then, run it locally.
+On Vercel the app runs as a **signed-in, one-time** tool: you sign in with your password, drop a video, search it, and when you leave the page (close, reload, or "New video") the video is deleted from TwelveLabs. Nothing is kept.
+
+```
+Browser ──(private upload, no size limit)──▶ Vercel Blob (private store)
+Server  ──temporary 2-hour signed link──────▶ TwelveLabs fetches the file → asset → indexed asset
+Server  ──deletes the Blob copy as soon as TwelveLabs has it
+Browser ──plays the file from your own computer; search & click-to-seek as locally
+Leave   ──navigator.sendBeacon → delete the TwelveLabs asset (and any leftover upload)
+Safety net: on each new upload, this app's tagged assets/uploads older than 6 h are swept.
+```
+
+Why Blob: TwelveLabs' upload links reject browser uploads (checked: CORS preflight returns 403), and Vercel functions cap request bodies at 4.5 MB, so the browser uploads to a private Blob store instead.
+
+### Set-up (once, in the Vercel dashboard)
+
+1. **Storage → Create → Blob** → access **Private** → create and connect it to this project (Production + Preview). This adds `BLOB_READ_WRITE_TOKEN`.
+2. **Settings → Environment Variables** → add:
+   - `TWELVELABS_API_KEY`: your key
+   - `APP_PASSWORD`: the password you'll sign in with (12+ characters; a passphrase is best)
+   - optional `TWELVELABS_INDEX_ID`: otherwise the app reuses its own `footage-search-…` index, or another compatible one
+3. **Deployments → ⋯ → Redeploy**.
+
+No Firebase, Supabase or database is needed. Sign-in is a single owner password: the session cookie is signed with a key derived from the password and API key (changing the password signs every browser out), it is `HttpOnly`, `Secure` and `SameSite=Lax`, it lasts 12 hours, and wrong guesses are slowed down. Every page and API route sits behind the check (`src/proxy.ts`).
+
+Limits on Vercel's Hobby plan: Blob includes 10 GB of data transfer and 1 GB of storage per month. Each upload counts once as transfer when TwelveLabs fetches it, and copies are deleted within minutes. Videos up to 4 GB.
 
 ## How it works
 
@@ -87,7 +111,7 @@ The original file is played as uploaded; nothing is transcoded and FFmpeg is not
 ```sh
 npm run typecheck   # next typegen + tsc
 npm run lint
-npm test            # vitest, 52 tests (mocked TwelveLabs)
+npm test            # vitest, 68 tests (mocked TwelveLabs and Blob)
 npm run build
 ```
 

@@ -45,7 +45,10 @@ export interface VideoProvider {
   ensureIndex(signal?: AbortSignal): Promise<ProviderIndex>;
   getIndex(indexId: string, signal?: AbortSignal): Promise<ProviderIndex>;
   uploadAsset(file: UploadFileInput, signal?: AbortSignal, onHeartbeat?: () => void): Promise<{ assetId: string }>;
+  /** TwelveLabs downloads the file from a public or presigned URL (videos up to 4 GB). */
+  createAssetFromUrl(url: string, filename: string, signal?: AbortSignal): Promise<{ assetId: string }>;
   getAsset(assetId: string, signal?: AbortSignal): Promise<AssetState>;
+  listAssets(signal?: AbortSignal): Promise<{ id: string; filename: string | null; createdAt: string | null }[]>;
   /** Indexed assets in `indexId` that reference `assetId` (to avoid indexing twice). */
   findIndexedAssets(assetId: string, indexId: string, signal?: AbortSignal): Promise<string[]>;
   indexAsset(indexId: string, assetId: string, signal?: AbortSignal): Promise<{ indexedAssetId: string }>;
@@ -54,6 +57,18 @@ export interface VideoProvider {
   deleteIndexedAsset(indexId: string, indexedAssetId: string, signal?: AbortSignal): Promise<"deleted" | "not_found">;
   /** Deletes the asset and (force) any indexed assets that reference it. */
   deleteAsset(assetId: string, signal?: AbortSignal): Promise<"deleted" | "not_found">;
+}
+
+/** Small key/value store for provider state (chosen index, unsupported options). */
+export interface SettingsStore {
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+}
+
+/** Per-process settings for stateless deployments; choices are re-derived after a cold start. */
+export function memorySettings(): SettingsStore {
+  const values = new Map<string, string>();
+  return { get: (key) => values.get(key) ?? null, set: (key, value) => void values.set(key, value) };
 }
 
 export class ProviderError extends Error {

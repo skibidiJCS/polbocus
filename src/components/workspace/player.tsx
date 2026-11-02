@@ -38,7 +38,7 @@ function Icon({ name }: { name: "play" | "pause" | "sound" | "muted" | "expand" 
   );
 }
 
-export function Player({ ref, src, label, fallbackDuration, segments, activeIndex, hoverIndex, onHover, onSelect, mediaError, onMediaError }: {
+export function Player({ ref, src, label, fallbackDuration, segments, activeIndex, hoverIndex, onHover, onSelect, mediaError, onMediaError, onDuration }: {
   ref?: Ref<PlayerHandle>;
   src: string;
   label: string;
@@ -50,6 +50,7 @@ export function Player({ ref, src, label, fallbackDuration, segments, activeInde
   onSelect: (index: number) => void;
   mediaError: string | null;
   onMediaError: (message: string) => void;
+  onDuration?: (seconds: number) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -141,7 +142,10 @@ export function Player({ ref, src, label, fallbackDuration, segments, activeInde
           onClick={togglePlay}
           onLoadedMetadata={(event) => {
             const video = event.currentTarget;
-            if (Number.isFinite(video.duration)) setDuration(video.duration);
+            if (Number.isFinite(video.duration)) {
+              setDuration(video.duration);
+              onDuration?.(video.duration);
+            }
             setReady(true);
             if (pendingSeek.current !== null) {
               video.currentTime = clampSeek(pendingSeek.current, video.duration);

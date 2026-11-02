@@ -1,6 +1,6 @@
 import "server-only";
 import { getServerConfig } from "./config";
-import { getDb } from "./db";
+import { dbSettings, getDb } from "./db";
 import { createTwelveLabsProvider } from "./twelvelabs";
 import type { VideoProvider } from "./video-provider";
 import { createWorker, type Worker } from "./worker";
@@ -24,7 +24,7 @@ export function getProvider(): VideoProvider | null {
   if (cachedProvider?.key !== cacheKey) {
     cachedProvider = {
       key: cacheKey,
-      provider: createTwelveLabsProvider({ apiKey: config.apiKey, db: getDb(), configuredIndexId: config.indexId }),
+      provider: createTwelveLabsProvider({ apiKey: config.apiKey, settings: dbSettings(getDb()), configuredIndexId: config.indexId }),
     };
   }
   return cachedProvider.provider;

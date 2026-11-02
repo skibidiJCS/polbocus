@@ -1,7 +1,6 @@
 import "server-only";
 import { ProviderError, ProviderNotConfiguredError } from "./video-provider";
-import { ServiceError } from "./video-service";
-import { UploadError } from "./upload";
+import { ServiceError, UploadError } from "./errors";
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 

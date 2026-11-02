@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@/lib/server/db";
-import { getSetting } from "@/lib/server/db";
+import { dbSettings, getSetting } from "@/lib/server/db";
 import { createTwelveLabsProvider, TWELVELABS_BASE_URL } from "@/lib/server/twelvelabs";
 import { ProviderError } from "@/lib/server/video-provider";
 import { jsonResponse, tempDb, tempDir } from "./helpers";
@@ -35,7 +35,7 @@ const marengoIndex = { _id: "idx1", models: [{ model_name: "marengo3.0", model_o
 describe("TwelveLabs adapter", () => {
   it("restricts search to the selected provider video with the documented filter", async () => {
     const { calls, fetchImpl } = mockFetch(() => jsonResponse({ data: [{ video_id: "vid-A", start: 1.25, end: 4.5, rank: 1, thumbnail_url: "https://thumb" }] }));
-    const provider = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl });
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl });
     const items = await provider.search({ indexId: "idx1", providerVideoId: "vid-A", query: "a dog jumps", searchOptions: ["visual", "transcription"], pageLimit: 20 });
     expect(calls[0].url).toBe(`${TWELVELABS_BASE_URL}/search`);
     expect(calls[0].method).toBe("POST");
@@ -56,7 +56,7 @@ describe("TwelveLabs adapter", () => {
       if (call.url.endsWith("/indexes/new-index")) return jsonResponse({ ...marengoIndex, _id: "new-index" });
       throw new Error(`unexpected ${call.url}`);
     });
-    const provider = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl });
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl });
     const [a, b] = await Promise.all([provider.ensureIndex(), provider.ensureIndex()]);
     expect(a.id).toBe("new-index");
     expect(b.id).toBe("new-index");
@@ -66,7 +66,7 @@ describe("TwelveLabs adapter", () => {
     expect(getSetting(db, "twelvelabs.index_id")).toBe("new-index");
 
     // A fresh adapter (e.g. after restart) reuses the stored index instead of creating another.
-    const second = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl });
+    const second = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl });
     expect((await second.ensureIndex()).id).toBe("new-index");
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
   });
@@ -82,7 +82,7 @@ describe("TwelveLabs adapter", () => {
       }
       throw new Error(`unexpected ${call.method} ${call.url}`);
     });
-    const provider = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl });
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl });
     expect(await provider.ensureIndex()).toEqual({ id: "best", searchOptions: ["visual", "transcription", "audio"] });
     expect(calls.some((c) => c.method === "POST")).toBe(false);
     expect(getSetting(db, "twelvelabs.index_id")).toBe("best");
@@ -90,19 +90,19 @@ describe("TwelveLabs adapter", () => {
 
   it("uses a configured index and rejects incompatible ones", async () => {
     const { fetchImpl } = mockFetch(() => jsonResponse({ _id: "cfg", models: [{ model_name: "pegasus1.2", model_options: ["visual", "audio"] }] }));
-    const provider = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: "cfg", fetchImpl });
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: "cfg", fetchImpl });
     await expect(provider.ensureIndex()).rejects.toMatchObject({ code: "index_incompatible", retryable: false });
   });
 
   it("derives search options from the index model options", async () => {
     const { fetchImpl } = mockFetch(() => jsonResponse({ _id: "v", models: [{ model_name: "marengo3.0", model_options: ["visual"] }] }));
-    const provider = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: "v", fetchImpl });
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: "v", fetchImpl });
     expect((await provider.getIndex("v")).searchOptions).toEqual(["visual"]);
   });
 
   it("turns 429 into a retryable error with Retry-After and never leaks the key", async () => {
     const { fetchImpl } = mockFetch(() => jsonResponse({ code: "too_many_requests", message: `slow down ${API_KEY}` }, { status: 429, headers: { "retry-after": "17" } }));
-    const provider = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl });
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl });
     const error = await provider.search({ indexId: "i", providerVideoId: "v", query: "q", searchOptions: ["visual"], pageLimit: 5 }).catch((e) => e);
     expect(error).toBeInstanceOf(ProviderError);
     expect(error.retryable).toBe(true);
@@ -112,18 +112,18 @@ describe("TwelveLabs adapter", () => {
   });
 
   it("treats 4xx validation errors as permanent and network failures as temporary", async () => {
-    const bad = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl: mockFetch(() => jsonResponse({ code: "parameter_invalid", message: "nope" }, { status: 400 })).fetchImpl });
+    const bad = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl: mockFetch(() => jsonResponse({ code: "parameter_invalid", message: "nope" }, { status: 400 })).fetchImpl });
     await expect(bad.getAsset("a")).rejects.toMatchObject({ retryable: false, status: 400 });
-    const offline = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl: mockFetch(() => { throw new TypeError("fetch failed"); }).fetchImpl });
+    const offline = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl: mockFetch(() => { throw new TypeError("fetch failed"); }).fetchImpl });
     await expect(offline.getAsset("a")).rejects.toMatchObject({ retryable: true });
   });
 
   it("reports not-found deletions honestly", async () => {
-    const provider = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl: mockFetch(() => jsonResponse({ code: "resource_not_exist", message: "gone" }, { status: 400 })).fetchImpl });
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl: mockFetch(() => jsonResponse({ code: "resource_not_exist", message: "gone" }, { status: 400 })).fetchImpl });
     expect(await provider.deleteAsset("a")).toBe("not_found");
-    const ok = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl: mockFetch(() => new Response(null, { status: 204 })).fetchImpl });
+    const ok = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl: mockFetch(() => new Response(null, { status: 204 })).fetchImpl });
     expect(await ok.deleteAsset("a")).toBe("deleted");
-    const failing = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl: mockFetch(() => jsonResponse({ message: "boom" }, { status: 500 })).fetchImpl });
+    const failing = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl: mockFetch(() => jsonResponse({ message: "boom" }, { status: 500 })).fetchImpl });
     await expect(failing.deleteAsset("a")).rejects.toBeInstanceOf(ProviderError);
   });
 
@@ -131,7 +131,7 @@ describe("TwelveLabs adapter", () => {
     const file = path.join(dir.dir, "clip.mp4");
     writeFileSync(file, Buffer.alloc(2048, 1));
     const { calls, fetchImpl } = mockFetch(() => jsonResponse({ _id: "asset-1", status: "processing" }, { status: 201 }));
-    const provider = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl });
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl });
     expect(await provider.uploadAsset({ path: file, sizeBytes: 2048, filename: "clip.mp4", mimeType: "video/mp4" })).toEqual({ assetId: "asset-1" });
     const form = calls[0].body as FormData;
     expect(calls[0].url).toBe(`${TWELVELABS_BASE_URL}/assets`);
@@ -162,7 +162,7 @@ describe("TwelveLabs adapter", () => {
       if (call.url.includes("/assets/multipart-uploads/up1")) return jsonResponse({ status: "completed" });
       throw new Error(`unexpected ${call.method} ${call.url}`);
     });
-    const provider = createTwelveLabsProvider({ apiKey: API_KEY, db, configuredIndexId: null, fetchImpl, sleep: async () => {} });
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl, sleep: async () => {} });
     const result = await provider.uploadAsset({ path: file, sizeBytes: size, filename: "big.mp4", mimeType: "video/mp4" });
     expect(result).toEqual({ assetId: "asset-big" });
     expect(puts.map((p) => p.size)).toEqual([100_000_000, 100_000_000, 50_000_000]);

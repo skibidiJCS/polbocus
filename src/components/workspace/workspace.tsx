@@ -2,18 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { formatBytes, formatRange, formatTimestamp } from "@/lib/time";
-import type { SearchSegment, VideoSummary } from "@/types/video";
+import type { VideoSummary } from "@/types/video";
 import { ApiError, deleteVideo, fetchVideos, retryVideo, searchMoments, uploadVideo, type SearchMode } from "./client-api";
 import { DeleteDialog } from "./delete-dialog";
 import { Player, type PlayerHandle } from "./player";
+import { MomentsPanel, SearchForm, type Results as PanelResults } from "./search-panels";
 import { isInProgress, statusDetail, VideoLibrary, type UploadingItem } from "./video-library";
 
-const searchModes: { value: SearchMode; label: string; hint: string }[] = [
-  { value: "all", label: "everything", hint: "What is seen, heard, and said" },
-  { value: "visual", label: "what’s seen", hint: "Only what appears on screen" },
-  { value: "speech", label: "what’s said", hint: "Only spoken words" },
-];
-const examples = ["someone drops their phone", "a person walks through a doorway", "outdoors, at night", "someone mentions the deadline"];
 const ACCEPT = "video/mp4,video/quicktime,video/x-m4v,video/webm,video/x-matroska,.mp4,.mov,.m4v,.webm,.mkv";
 const SELECTED_KEY = "footage.selectedVideo";
 
@@ -23,14 +18,7 @@ interface PendingFile {
   duration: number | null;
 }
 
-interface Results {
-  id: number;
-  videoId: string;
-  query: string;
-  mode: SearchMode;
-  segments: SearchSegment[];
-  notes: string[];
-}
+type Results = PanelResults & { videoId: string };
 
 interface Toast {
   id: number;
@@ -367,102 +355,23 @@ export function Workspace({ apiKeyConfigured, maxUploadBytes, initialVideos }: {
             </div>
           )}
 
-          <form className={`query ${canSearch ? "" : "is-disabled"} ${searching ? "is-searching" : ""}`} onSubmit={runSearch} role="search">
-            <div className="query-line">
-              <label htmlFor="moment-query" className="query-lead">Find the moment</label>
-              <input
-                ref={queryRef}
-                id="moment-query"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                maxLength={500}
-                disabled={!canSearch}
-                placeholder={canSearch ? "someone drops their phone" : "once a video is ready"}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <button type="submit" className="query-go" disabled={!canSearch || searching || !query.trim()}>
-                {searching ? "Searching" : "Search ↵"}
-              </button>
-              <span className="query-rule" aria-hidden="true" />
-            </div>
-            <div className="query-meta">
-              <div className="modes" role="radiogroup" aria-label="Search in">
-                <span className="faint">in</span>
-                {searchModes.map((option) => (
-                  <button key={option.value} type="button" role="radio" aria-checked={mode === option.value} title={option.hint} className={mode === option.value ? "is-on" : ""} onClick={() => setMode(option.value)}>
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <p className="query-status">{queryStatus}</p>
-            </div>
-            {canSearch && (
-              <div className="examples">
-                <span className="faint">Examples</span>
-                {examples.map((text) => (
-                  <button type="button" key={text} onClick={() => { setQuery(text); queryRef.current?.focus(); }}>{text}</button>
-                ))}
-              </div>
-            )}
-            {searchError && <p className="inline-error" role="alert">{searchError}</p>}
-          </form>
+          <SearchForm
+            inputRef={queryRef}
+            canSearch={canSearch}
+            searching={searching}
+            query={query}
+            onQuery={(value) => { setQuery(value); queryRef.current?.focus(); }}
+            mode={mode}
+            onMode={setMode}
+            onSubmit={runSearch}
+            status={queryStatus}
+            error={searchError}
+          />
         </section>
 
-        {selected && !pending && <section className={`moments ${searching ? "is-loading" : ""}`} aria-label="Matching moments" aria-busy={searching}>
-          <header className="moments-head">
-            <h2>Moments</h2>
-            {visible && <span className="mono faint">{visible.segments.length}</span>}
-          </header>
-          {visible ? (
-            visible.segments.length ? (
-              <ol className="moment-list" key={visible.id}>
-                {visible.segments.map((segment, index) => {
-                  const state = index === activeIndex ? "is-active" : index === hoverIndex ? "is-hover" : "";
-                  return (
-                    <li key={`${segment.startSeconds}-${index}`} style={{ ["--i" as string]: index }}>
-                      <button
-                        className={`moment ${state}`}
-                        onClick={() => playSegment(index)}
-                        onMouseEnter={() => setHoverIndex(index)}
-                        onMouseLeave={() => setHoverIndex(null)}
-                        aria-pressed={index === activeIndex}
-                        title={segment.rank !== undefined ? `TwelveLabs rank ${segment.rank} (1 = most relevant). Not a confidence score.` : undefined}
-                      >
-                        <span className="moment-index">{String(index + 1).padStart(2, "0")}</span>
-                        <span className="moment-body">
-                          <span className="moment-time">{formatRange(segment.startSeconds, segment.endSeconds)}</span>
-                          {segment.transcription && <span className="moment-quote">“{segment.transcription}”</span>}
-                        </span>
-                        <span className="moment-thumb">
-                          <span className="moment-thumb-fallback">{formatTimestamp(segment.startSeconds)}</span>
-                          {segment.thumbnailUrl && (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={segment.thumbnailUrl} alt="" loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} />
-                          )}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-            ) : (
-              <div className="moments-empty">
-                <p className="serif">Nothing matched “{visible.query}”.</p>
-                <p>Try describing what’s visible or said in other words{visible.mode !== "all" ? ", or search everything" : ""}.</p>
-              </div>
-            )
-          ) : (
-            <div className="moments-empty">
-              <p className="serif">{selected?.status === "ready" ? "Moments you find will gather here." : "Nothing to search yet."}</p>
-              {selected?.status === "ready" && <p>Click one to play it from that point.</p>}
-            </div>
-          )}
-          {visible?.notes.map((note) => <p key={note} className="moments-note">{note}</p>)}
-          {visible && visible.segments.length > 0 && (
-            <p className="moments-foot">Ordered by TwelveLabs relevance rank, most relevant first. Ranks are not confidence scores.</p>
-          )}
-        </section>}
+        {selected && !pending && (
+          <MomentsPanel results={visible} searching={searching} ready={selected.status === "ready"} activeIndex={activeIndex} hoverIndex={hoverIndex} onHover={setHoverIndex} onPlay={playSegment} />
+        )}
       </main>
 
       <div className={`drop-veil ${dragging ? "is-on" : ""}`} aria-hidden="true">

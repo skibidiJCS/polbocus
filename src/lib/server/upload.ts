@@ -4,16 +4,14 @@ import { createWriteStream } from "node:fs";
 import { mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { once } from "node:events";
+import { finished } from "node:stream/promises";
 import type { Db } from "./db";
+import { UploadError } from "./errors";
 import { ACCEPTED_FORMATS_LABEL, detectContainer, type DetectedContainer } from "./media";
 import { findVideoBySha256, insertQueuedVideo } from "./videos-repo";
 import type { VideoRecord } from "@/types/video";
 
-export class UploadError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
-  }
-}
+export { UploadError };
 
 const SNIFF_BYTES = 64;
 
@@ -68,6 +66,9 @@ export async function receiveToTempFile(body: ReadableStream<Uint8Array>, option
   } catch (error) {
     reader.cancel().catch(() => {});
     out.destroy();
+    // The file is opened asynchronously; wait until the stream has fully closed so the
+    // file cannot reappear after it is removed.
+    await finished(out).catch(() => {});
     await rm(tempPath, { force: true });
     throw error;
   }

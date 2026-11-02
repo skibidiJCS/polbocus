@@ -1,7 +1,5 @@
 import "server-only";
 import { openAsBlob } from "node:fs";
-import type { Db } from "./db";
-import { getSetting, setSetting } from "./db";
 import { PROVIDER_LIMITS } from "./config";
 import {
   isNotFound,
@@ -11,6 +9,7 @@ import {
   type ProviderIndex,
   type ProviderSearchItem,
   type SearchOption,
+  type SettingsStore,
   type UploadFileInput,
   type VideoProvider,
 } from "./video-provider";
@@ -57,8 +56,8 @@ function isAbortError(error: unknown) {
   return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
 }
 
-export function createTwelveLabsProvider(options: { apiKey: string; db: Db; configuredIndexId: string | null; fetchImpl?: FetchLike; baseUrl?: string; sleep?: (ms: number) => Promise<void> }): VideoProvider {
-  const { apiKey, db, configuredIndexId } = options;
+export function createTwelveLabsProvider(options: { apiKey: string; settings: SettingsStore; configuredIndexId: string | null; fetchImpl?: FetchLike; baseUrl?: string; sleep?: (ms: number) => Promise<void> }): VideoProvider {
+  const { apiKey, settings, configuredIndexId } = options;
   const fetchImpl = options.fetchImpl ?? fetch;
   const baseUrl = options.baseUrl ?? TWELVELABS_BASE_URL;
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -142,7 +141,7 @@ export function createTwelveLabsProvider(options: { apiKey: string; db: Db; conf
 
   async function ensureIndexOnce(signal?: AbortSignal): Promise<ProviderIndex> {
     if (configuredIndexId) return getIndex(configuredIndexId, signal);
-    const stored = getSetting(db, INDEX_SETTING_KEY);
+    const stored = settings.get(INDEX_SETTING_KEY);
     if (stored) {
       try {
         return await getIndex(stored, signal);
@@ -151,22 +150,25 @@ export function createTwelveLabsProvider(options: { apiKey: string; db: Db; conf
         if (!isNotFound(error)) throw error;
       }
     }
-    // Reuse a compatible existing index (Marengo with visual + audio) before creating one;
-    // prefer one with thumbnails so results can show them.
-    const listed = await call<{ data?: (Parameters<typeof readIndex>[0] & { addons?: string[] })[] }>("GET", "/indexes", { signal, query: { page_limit: "50" } });
+    // Reuse a compatible existing index (Marengo with visual + audio) before creating one.
+    // The choice is deterministic so stateless instances agree: indexes this app created
+    // first, then ones with thumbnails, then by ID.
+    const listed = await call<{ data?: (Parameters<typeof readIndex>[0] & { addons?: string[]; index_name?: string })[] }>("GET", "/indexes", { signal, query: { page_limit: "50" } });
     const compatible = (listed.data ?? [])
       .flatMap((body) => {
         try {
           const index = readIndex(body, body._id ?? "");
-          return index.id && index.searchOptions.includes("audio") ? [{ index, thumbnails: Boolean(body.addons?.includes("thumbnail") || body.models?.some((m) => (m as { addons?: string[] }).addons?.includes("thumbnail"))) }] : [];
+          const thumbnails = Boolean(body.addons?.includes("thumbnail") || body.models?.some((m) => (m as { addons?: string[] }).addons?.includes("thumbnail")));
+          const ours = Boolean(body.index_name?.startsWith("footage-search"));
+          return index.id && index.searchOptions.includes("audio") ? [{ index, thumbnails, ours }] : [];
         } catch {
           return [];
         }
       })
-      .sort((a, b) => Number(b.thumbnails) - Number(a.thumbnails));
+      .sort((a, b) => Number(b.ours) - Number(a.ours) || Number(b.thumbnails) - Number(a.thumbnails) || a.index.id.localeCompare(b.index.id));
     if (compatible.length) {
       const { index } = compatible[0];
-      setSetting(db, INDEX_SETTING_KEY, index.id);
+      settings.set(INDEX_SETTING_KEY, index.id);
       indexCache.set(index.id, { at: Date.now(), index });
       return index;
     }
@@ -175,7 +177,7 @@ export function createTwelveLabsProvider(options: { apiKey: string; db: Db; conf
       signal,
       json: { index_name: name, models: [{ model_name: DEFAULT_MODEL_NAME, model_options: ["visual", "audio"] }], addons: ["thumbnail"] },
     });
-    setSetting(db, INDEX_SETTING_KEY, created._id);
+    settings.set(INDEX_SETTING_KEY, created._id);
     const index: ProviderIndex = { id: created._id, searchOptions: ["visual", "transcription", "audio"] };
     indexCache.set(created._id, { at: Date.now(), index });
     return index;
@@ -277,6 +279,20 @@ export function createTwelveLabsProvider(options: { apiKey: string; db: Db; conf
         }
       }
       return uploadMultipart(file, signal, onHeartbeat);
+    },
+
+    async createAssetFromUrl(url, filename, signal) {
+      const form = new FormData();
+      form.append("method", "url");
+      form.append("url", url);
+      form.append("filename", filename);
+      const asset = await call<{ _id: string }>("POST", "/assets", { form, signal });
+      return { assetId: asset._id };
+    },
+
+    async listAssets(signal) {
+      const body = await call<{ data?: { _id: string; filename?: string; created_at?: string }[] }>("GET", "/assets", { signal, query: { page_limit: "50" } });
+      return (body.data ?? []).map((asset) => ({ id: asset._id, filename: asset.filename ?? null, createdAt: asset.created_at ?? null }));
     },
 
     async getAsset(assetId, signal): Promise<AssetState> {

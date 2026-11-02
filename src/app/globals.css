@@ -321,6 +321,28 @@ button:disabled { cursor: default; }
 .moments.is-loading .moment-list, .moments.is-loading .moments-empty { opacity: 0.4; }
 .moments-note, .moments-foot { margin: 14px 0 0; font-family: var(--mono); font-size: 10.5px; line-height: 1.7; color: var(--faint); }
 
+/* One-time session (hosted) ------------------------------------- */
+.rail-note { margin: 18px 8px 0; font-family: var(--serif); font-style: italic; font-size: 14px; line-height: 1.5; color: var(--muted); }
+.library-status.is-ready { color: var(--moss); }
+.library-item .upload-line { display: block; }
+.progress-bar-wide { height: 1px; margin: 14px 0 6px; background: var(--line-strong); overflow: hidden; }
+.progress-bar-wide span { display: block; height: 100%; background: var(--ink); transform-origin: left; transition: transform 240ms var(--ease); }
+.confirm-text.is-error { color: var(--clay); }
+.confirm-text .is-warning { color: var(--ochre); }
+.stage-main > .confirm-bar { margin-top: 4px; }
+
+/* Sign-in ----------------------------------------------------------- */
+.login { max-width: 520px; margin: 18vh auto 80px; padding: 0 24px; animation: rise 420ms var(--ease) both; }
+.login h1 { margin: 36px 0 34px; font-family: var(--serif); font-weight: 400; font-size: clamp(38px, 6vw, 54px); line-height: 1.04; letter-spacing: -0.02em; }
+.login-form label { display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); margin-bottom: 10px; }
+.login-line { display: flex; align-items: center; gap: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line-strong); transition: border-color 200ms var(--ease); }
+.login-line:focus-within { border-color: var(--ink-soft); }
+.login-line input { flex: 1; min-width: 0; background: none; border: 0; outline: none; padding: 0; font-family: var(--serif); font-size: 26px; color: var(--ink); letter-spacing: 0.08em; }
+.login-fine { margin-top: 22px; font-family: var(--mono); font-size: 11px; line-height: 1.8; color: var(--faint); }
+.login-setup p { color: var(--ink-soft); font-size: 15px; line-height: 1.7; }
+.login-setup ul, .notice-list { margin: 10px 0 0; padding-left: 18px; color: var(--ink-soft); line-height: 2; }
+.login-setup code { font-family: var(--mono); font-size: 13px; }
+
 /* Overlays -------------------------------------------------------- */
 .drop-veil {
   position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; pointer-events: none;

@@ -2,82 +2,26 @@ import "server-only";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import type { Db } from "./db";
-import { getSetting, nowIso, setSetting } from "./db";
-import { isNotFound, ProviderError, type SearchOption, type VideoProvider } from "./video-provider";
+import { dbSettings, nowIso } from "./db";
+import { ServiceError } from "./errors";
+import { searchIndexedVideo, validateQuery, type SearchMode, type SearchResponse } from "./search";
+import { isNotFound, type VideoProvider } from "./video-provider";
 import { deleteVideoRecord, getVideo, updateVideo } from "./videos-repo";
-import { normalizeSegments } from "@/lib/segments";
-import type { DeleteVideoResult, DeletionOutcome, SearchSegment } from "@/types/video";
+import type { DeleteVideoResult, DeletionOutcome } from "@/types/video";
 
-export class ServiceError extends Error {
-  constructor(message: string, readonly status: number, readonly retryAfterSeconds?: number) {
-    super(message);
-  }
-}
-
-export const MAX_QUERY_LENGTH = 500;
-export const SEARCH_PAGE_LIMIT = 20;
-
-const noTranscriptionKey = (indexId: string) => `twelvelabs.no_transcription.${indexId}`;
-
-/**
- * Which TwelveLabs search options to use. "all" combines every option the index supports
- * (operator=or); live testing showed visual matches then outrank speech, so users can
- * restrict a search to what is seen or to what is said.
- */
-export type SearchMode = "all" | "visual" | "speech";
-export const SEARCH_MODES: SearchMode[] = ["all", "visual", "speech"];
-
-export interface SearchResponse {
-  segments: SearchSegment[];
-  searchOptions: SearchOption[];
-  notes: string[];
-}
+export { ServiceError };
+export { SEARCH_MODES, type SearchMode, type SearchResponse } from "./search";
 
 export async function searchVideo(db: Db, provider: VideoProvider, videoId: string, rawQuery: string, signal?: AbortSignal, mode: SearchMode = "all"): Promise<SearchResponse> {
-  const query = rawQuery.trim();
-  if (!query) throw new ServiceError("Describe the moment you are looking for.", 400);
-  if (query.length > MAX_QUERY_LENGTH) throw new ServiceError(`Keep the description under ${MAX_QUERY_LENGTH} characters.`, 400);
+  const query = validateQuery(rawQuery);
   const video = getVideo(db, videoId);
   if (!video) throw new ServiceError("That video is no longer in the library.", 404);
   if (video.status !== "ready" || !video.providerVideoId || !video.providerIndexId) {
     throw new ServiceError("This video is not ready to search yet.", 409);
   }
-
-  const index = await provider.getIndex(video.providerIndexId, signal);
-  const supported = index.searchOptions.filter((option) => !(option === "transcription" && getSetting(db, noTranscriptionKey(index.id))));
-  let options = mode === "visual" ? supported.filter((o) => o === "visual") : mode === "speech" ? supported.filter((o) => o === "transcription") : supported;
-  if (!options.length) {
-    throw new ServiceError(mode === "speech" ? "This video's index does not support spoken-word search. Search everything or visuals instead." : "This index does not support that kind of search.", 400);
-  }
-  const notes: string[] = [];
-  const run = (searchOptions: SearchOption[]) =>
-    provider.search({ indexId: index.id, providerVideoId: video.providerVideoId!, query, searchOptions, pageLimit: SEARCH_PAGE_LIMIT }, signal);
-
-  let items;
-  try {
-    items = await run(options);
-  } catch (error) {
-    // One fallback, never a loop: drop transcription if this index rejects it.
-    const rejected = error instanceof ProviderError && (error.code === "search_option_not_supported" || error.code === "search_option_combination_not_supported");
-    if (!rejected || !options.includes("transcription")) throw error;
-    if (mode === "speech") {
-      setSetting(db, noTranscriptionKey(index.id), nowIso());
-      throw new ServiceError("This video's index does not support spoken-word search. Search everything or visuals instead.", 400);
-    }
-    setSetting(db, noTranscriptionKey(index.id), nowIso());
-    options = options.filter((option) => option !== "transcription");
-    notes.push("This index does not support spoken-word (transcription) search, so only visual and audio search were used.");
-    items = await run(options);
-  }
-
-  const result = normalizeSegments(items, { providerVideoId: video.providerVideoId, localVideoId: video.id, durationSeconds: video.durationSeconds });
-  if (result.droppedOtherVideo > 0) {
-    notes.push(`${result.droppedOtherVideo} result(s) from other videos in the index were hidden.`);
-  }
-  if (result.droppedInvalid > 0) {
-    notes.push(`${result.droppedInvalid} result(s) had timestamps outside this video and were hidden.`);
-  }
-  return { segments: result.segments, searchOptions: options, notes };
+  return searchIndexedVideo(provider, dbSettings(db), {
+    indexId: video.providerIndexId, providerVideoId: video.providerVideoId, localVideoId: video.id, durationSeconds: video.durationSeconds, query, mode,
+  }, signal);
 }
 
 /**

@@ -50,6 +50,10 @@ export function nowIso(date = new Date()) {
   return date.toISOString();
 }
 
+export function dbSettings(db: DatabaseSync) {
+  return { get: (key: string) => getSetting(db, key), set: (key: string, value: string) => setSetting(db, key, value) };
+}
+
 export function getSetting(db: DatabaseSync, key: string): string | null {
   const row = db.prepare("SELECT value FROM app_settings WHERE key = ?").get(key) as { value: string } | undefined;
   return row?.value ?? null;
