@@ -1,5 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <rect width="32" height="32" rx="8" fill="#121110"/>
-  <path d="M7 12V9.5A2.5 2.5 0 0 1 9.5 7H12M20 7h2.5A2.5 2.5 0 0 1 25 9.5V12M25 20v2.5a2.5 2.5 0 0 1-2.5 2.5H20M12 25H9.5A2.5 2.5 0 0 1 7 22.5V20" fill="none" stroke="#ece8df" stroke-width="2" stroke-linecap="round"/>
-  <rect x="14.6" y="10.5" width="2.8" height="11" rx="1.4" fill="#a3b18a"/>
+  <g transform="translate(3.6 8.25) scale(0.62)" fill="none" stroke="#ece8df" stroke-width="3" stroke-linecap="round">
+    <path d="M3 8v14"/>
+    <circle cx="7.5" cy="12.5" r="4.5"/>
+    <path d="M16 3v14"/>
+    <circle cx="20.5" cy="12.5" r="4.5"/>
+    <path d="M36.68 9.32A4.5 4.5 0 1 0 36.68 15.68" stroke="#a3b18a"/>
+  </g>
 </svg>
