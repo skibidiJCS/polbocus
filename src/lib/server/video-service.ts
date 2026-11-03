@@ -28,7 +28,7 @@ export async function searchVideo(db: Db, provider: VideoProvider, videoId: stri
  * Makes a failed video eligible for the worker again, keeping provider resources
  * that can be reused (a ready asset) and removing ones that cannot (a failed indexed asset).
  */
-export async function retryVideo(db: Db, provider: VideoProvider | null, videoId: string) {
+export async function retryVideo(db: Db, provider: VideoProvider | null, videoId: string, clock: () => number = Date.now) {
   const video = getVideo(db, videoId);
   if (!video) throw new ServiceError("That video is no longer in the library.", 404);
   if (video.status !== "failed") throw new ServiceError("Only failed videos can be retried.", 409);
@@ -55,18 +55,20 @@ export async function retryVideo(db: Db, provider: VideoProvider | null, videoId
         if (state) await provider.deleteIndexedAsset(video.providerIndexId, providerTaskId);
         providerTaskId = null;
       }
-      // An indexed asset that is still in progress (e.g. after the 12-hour timeout) is kept and polled again.
+      // An indexed asset that is still in progress (e.g. after the 12-hour timeout) is kept and
+      // polled again, with a fresh timeout window below; nothing is uploaded or indexed twice.
     }
   }
 
-  const now = nowIso();
+  const now = nowIso(new Date(clock()));
   db.exec("BEGIN IMMEDIATE;");
   try {
     db.prepare(
       `UPDATE videos SET status = 'queued', error = NULL, provider_status = NULL, provider_asset_id = ?, provider_task_id = ?,
-         indexing_started_at = CASE WHEN ? IS NULL THEN NULL ELSE indexing_started_at END,
+         indexing_first_started_at = CASE WHEN ? IS NULL THEN indexing_first_started_at ELSE COALESCE(indexing_first_started_at, indexing_started_at) END,
+         indexing_started_at = CASE WHEN ? IS NULL THEN NULL ELSE ? END,
          updated_at = ?, status_changed_at = ? WHERE id = ?`,
-    ).run(providerAssetId, providerTaskId, providerTaskId, now, now, video.id);
+    ).run(providerAssetId, providerTaskId, providerTaskId, providerTaskId, now, now, now, video.id);
     db.prepare(
       `INSERT INTO indexing_jobs(id, video_id, attempts, next_attempt_at, updated_at) VALUES (lower(hex(randomblob(16))), ?, 0, ?, ?)
        ON CONFLICT(video_id) DO UPDATE SET attempts = 0, next_attempt_at = excluded.next_attempt_at, last_error = NULL, lease_owner = NULL, lease_expires_at = NULL, updated_at = excluded.updated_at`,

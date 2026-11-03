@@ -1,17 +1,8 @@
 import "server-only";
 import { ProviderError, ProviderNotConfiguredError } from "./video-provider";
 import { ServiceError, UploadError } from "./errors";
-
-const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
-
-function hostname(hostHeader: string | null) {
-  if (!hostHeader) return null;
-  try {
-    return new URL(`http://${hostHeader}`).hostname;
-  } catch {
-    return null;
-  }
-}
+import { isSessionMode } from "@/lib/auth";
+import { isLocalHost } from "@/lib/hosts";
 
 /**
  * Single-user localhost prototype: refuse requests addressed to non-local hosts
@@ -19,8 +10,9 @@ function hostname(hostHeader: string | null) {
  * requests could otherwise trigger uploads, deletions, or billable searches).
  */
 export function rejectNonLocal(request: Request): Response | null {
-  const host = hostname(request.headers.get("host"));
-  if (!host || !LOCAL_HOSTS.has(host)) {
+  // The local library does not exist in hosted mode (the proxy answers 404 first).
+  if (isSessionMode()) return Response.json({ error: "Not found." }, { status: 404 });
+  if (!isLocalHost(request.headers.get("host"))) {
     return Response.json({ error: "This prototype only accepts requests to localhost." }, { status: 403 });
   }
   if (request.method !== "GET" && request.method !== "HEAD") {

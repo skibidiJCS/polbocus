@@ -297,9 +297,15 @@ export function createTwelveLabsProvider(options: { apiKey: string; settings: Se
       return { assetId: asset._id };
     },
 
-    async listAssets(signal) {
-      const body = await call<{ data?: { _id: string; filename?: string; created_at?: string }[] }>("GET", "/assets", { signal, query: { page_limit: "50" } });
-      return (body.data ?? []).map((asset) => ({ id: asset._id, filename: asset.filename ?? null, createdAt: asset.created_at ?? null }));
+    async listAssets({ page, pageLimit, filename }, signal) {
+      const query: Record<string, string> = { page: String(page), page_limit: String(Math.min(50, pageLimit)) };
+      if (filename) query.filename = filename;
+      const body = await call<{ data?: { _id: string; filename?: string; created_at?: string }[]; page_info?: { total_page?: unknown } }>("GET", "/assets", { signal, query });
+      const totalPages = body.page_info?.total_page;
+      return {
+        items: (body.data ?? []).map((asset) => ({ id: asset._id, filename: asset.filename ?? null, createdAt: asset.created_at ?? null })),
+        totalPages: typeof totalPages === "number" && Number.isFinite(totalPages) ? totalPages : null,
+      };
     },
 
     async getAsset(assetId, signal): Promise<AssetState> {

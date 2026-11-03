@@ -95,6 +95,16 @@ describe("TwelveLabs adapter", () => {
     await expect(provider.ensureIndex()).rejects.toMatchObject({ code: "index_incompatible", retryable: false });
   });
 
+  it("lists assets one page at a time with the documented filename filter", async () => {
+    const { calls, fetchImpl } = mockFetch(() => jsonResponse({ data: [{ _id: "a1", filename: "footage-session--x--clip.mp4", created_at: "2026-11-02T10:00:00Z" }], page_info: { page: 3, total_page: 4, limit_per_page: 50 } }));
+    const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: null, fetchImpl });
+    const page = await provider.listAssets({ page: 3, pageLimit: 50, filename: "footage-session--" });
+    const url = new URL(calls[0].url);
+    expect(url.pathname).toBe("/v1.3/assets");
+    expect(Object.fromEntries(url.searchParams)).toEqual({ page: "3", page_limit: "50", filename: "footage-session--" });
+    expect(page).toEqual({ items: [{ id: "a1", filename: "footage-session--x--clip.mp4", createdAt: "2026-11-02T10:00:00Z" }], totalPages: 4 });
+  });
+
   it("derives search options from the index model options", async () => {
     const { fetchImpl } = mockFetch(() => jsonResponse({ _id: "v", models: [{ model_name: "marengo3.0", model_options: ["visual"] }] }));
     const provider = createTwelveLabsProvider({ apiKey: API_KEY, settings: dbSettings(db), configuredIndexId: "v", fetchImpl });

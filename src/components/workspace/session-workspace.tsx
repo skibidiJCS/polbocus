@@ -10,8 +10,9 @@ import { Player, type PlayerHandle } from "./player";
 import { MomentsPanel, SearchForm, visibleSegments, type Results } from "./search-panels";
 
 /**
- * Hosted, one-time use: one video at a time, nothing kept. The file plays from this
- * computer; TwelveLabs indexes a copy that is deleted when the page is left.
+ * Hosted, one video at a time. The file plays from this computer; TwelveLabs indexes a
+ * copy. Leaving the page asks the server to delete it (best effort); the server also
+ * deletes sessions that stop sending heartbeats. See lib/server/session.ts for the policy.
  */
 const TYPES: Record<string, string> = { mp4: "video/mp4", mov: "video/quicktime", m4v: "video/x-m4v", webm: "video/webm", mkv: "video/x-matroska" };
 const ACCEPT = "video/mp4,video/quicktime,video/x-m4v,video/webm,video/x-matroska,.mp4,.mov,.m4v,.webm,.mkv";
@@ -32,13 +33,14 @@ interface LocalFile {
   duration: number | null;
 }
 
+/** The server keeps the resource IDs; the page only needs its session ID. */
 interface Session {
-  pathname?: string;
-  assetId?: string;
-  indexId?: string;
-  indexedAssetId?: string;
+  id?: string;
   durationSeconds?: number | null;
 }
+
+// Keeps an open page's session alive on the server (abandoned after 30 minutes without one).
+const HEARTBEAT_MS = 5 * 60_000;
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
@@ -96,14 +98,37 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
   const ready = stage.kind === "ready";
   const busy = stage.kind === "shrinking" || stage.kind === "uploading" || stage.kind === "processing" || stage.kind === "indexing";
 
-  /** Deletes the TwelveLabs copy and any leftover upload. Beacon form survives page unload. */
+  // Sessions whose end the server has not acknowledged yet. Kept until it does, and sent
+  // again (as beacons) if the page is left first.
+  const unconfirmed = useRef(new Set<string>());
+
+  /**
+   * Asks the server to delete the session's upload and TwelveLabs copy. The server tracks
+   * those itself and retries failed deletions; if this request never arrives, the session
+   * is deleted after 30 minutes without a heartbeat.
+   */
   const endSession = useCallback((viaBeacon: boolean) => {
-    const { assetId, pathname } = session.current;
+    const id = session.current.id;
     session.current = {};
-    if (!assetId && !pathname) return;
-    const body = JSON.stringify({ assetId, pathname });
-    if (viaBeacon && navigator.sendBeacon) navigator.sendBeacon("/api/session/end", new Blob([body], { type: "text/plain" }));
-    else void fetch("/api/session/end", { method: "POST", headers: { "content-type": "application/json" }, body, keepalive: true }).catch(() => {});
+    if (id) unconfirmed.current.add(id);
+    if (viaBeacon) {
+      for (const pending of unconfirmed.current) {
+        navigator.sendBeacon?.("/api/session/end", new Blob([JSON.stringify({ sessionId: pending })], { type: "text/plain" }));
+      }
+      return;
+    }
+    if (!id) return;
+    void (async () => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const response = await fetch("/api/session/end", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: id }), keepalive: true }).catch(() => null);
+        // 200: deleted; 202: the server has it queued for retry. Either way it's on record.
+        if (response && (response.ok || response.status === 400)) {
+          unconfirmed.current.delete(id);
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000 * 2 ** attempt));
+      }
+    })();
   }, []);
 
   // Leaving the page (close, reload, navigate away) ends the session.
@@ -121,6 +146,16 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
       window.removeEventListener("pageshow", restore);
     };
   }, [endSession]);
+
+  // Heartbeat while a session exists, so an open page is never treated as abandoned.
+  useEffect(() => {
+    if (!local) return;
+    const beat = setInterval(() => {
+      const id = session.current.id;
+      if (id) void fetch("/api/session/heartbeat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId: id }) }).catch(() => {});
+    }, HEARTBEAT_MS);
+    return () => clearInterval(beat);
+  }, [local]);
 
   // Warn before leaving only while work is in progress (the result would be lost).
   useEffect(() => {
@@ -167,16 +202,14 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
       await new Promise((resolve) => setTimeout(resolve, delay));
       if (signal.aborted) return;
       try {
-        const status = await post<{ stage: string; indexedAssetId?: string; providerStatus?: string; durationSeconds?: number | null; message?: string }>(
-          "/api/session/status", session.current, signal);
+        const status = await post<{ stage: string; providerStatus?: string; durationSeconds?: number | null; message?: string }>(
+          "/api/session/status", { sessionId: session.current.id }, signal);
         failures = 0;
         const enteredIndexing = !indexing && status.stage === "indexing";
         if (status.stage === "indexing") indexing = true;
-        if (status.indexedAssetId) session.current.indexedAssetId = status.indexedAssetId;
         if (status.durationSeconds) session.current.durationSeconds = status.durationSeconds;
         if (status.stage === "processing") setStage((s) => (s.kind === "processing" ? s : { kind: "processing", since: Date.now() }));
         else if (status.stage === "indexing") {
-          session.current.pathname = undefined; // TwelveLabs has its copy; the upload was removed.
           setStage((s) => ({ kind: "indexing", since: s.kind === "indexing" ? s.since : Date.now(), providerStatus: status.providerStatus ?? "pending" }));
         } else if (status.stage === "ready") {
           setStage({ kind: "ready" });
@@ -213,7 +246,9 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
       const ext = extensionOf(file)!;
       setStage({ kind: "uploading", loaded: 0, total: file.size });
       const send = presignedUploads ? uploadPresigned : upload;
-      const blob = await send(`sessions/${crypto.randomUUID()}.${ext}`, file, {
+      const sessionId = crypto.randomUUID();
+      session.current = { id: sessionId };
+      const blob = await send(`sessions/${sessionId}.${ext}`, file, {
         access: "private",
         handleUploadUrl: "/api/session/upload",
         contentType: TYPES[ext],
@@ -222,10 +257,8 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
         abortSignal: controller.signal,
         onUploadProgress: ({ loaded, total }) => setStage({ kind: "uploading", loaded, total }),
       });
-      session.current = { pathname: blob.pathname };
       setStage({ kind: "processing", since: Date.now() });
-      const started = await post<{ assetId: string; indexId: string }>("/api/session/start", { pathname: blob.pathname, filename: local.file.name }, controller.signal);
-      session.current = { ...session.current, assetId: started.assetId, indexId: started.indexId };
+      await post("/api/session/start", { sessionId, pathname: blob.pathname, filename: local.file.name }, controller.signal);
       await watchIndexing(controller.signal, local.duration ?? (await durationOf(local.url)));
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -255,8 +288,8 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
   }
 
   async function search(text: string, mode: SearchMode) {
-    const { indexId, indexedAssetId } = session.current;
-    if (!indexId || !indexedAssetId) return;
+    const sessionId = session.current.id;
+    if (!sessionId) return;
     const key = `${mode}\n${text.toLowerCase().replace(/\s+/g, " ")}`;
     const show = (result: { segments: Results["segments"]; notes: string[] }) => {
       setResults({ id: ++searchCount.current, query: text, mode, segments: result.segments, notes: result.notes });
@@ -276,7 +309,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
     setSearching(true);
     try {
       const result = await post<{ segments: Results["segments"]; notes: string[] }>("/api/session/search", {
-        indexId, videoId: indexedAssetId, query: text, mode, durationSeconds: local?.duration ?? session.current.durationSeconds ?? null,
+        sessionId, query: text, mode, durationSeconds: local?.duration ?? session.current.durationSeconds ?? null,
       }, controller.signal);
       searchCache.current.set(key, { segments: result.segments, notes: result.notes });
       show(result);
@@ -344,7 +377,7 @@ export function SessionWorkspace({ presignedUploads }: { presignedUploads: boole
                 </svg>
               </span>
               <span className="dropzone-title">Drop a video or <u>choose a file</u></span>
-              <span className="dropzone-sub">Up to 4 GB. Indexed by TwelveLabs and deleted when you leave.</span>
+              <span className="dropzone-sub">Up to 4 GB. Sent to TwelveLabs for indexing, and deleted when you leave — or by a daily cleanup if that fails.</span>
             </button>
           </section>
         </main>

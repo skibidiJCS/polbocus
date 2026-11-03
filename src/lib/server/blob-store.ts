@@ -10,7 +10,8 @@ export interface BlobStore {
   /** A GET URL that works without credentials until `validUntil` (ms since epoch). */
   presignGet(pathname: string, validUntil: number): Promise<string>;
   remove(pathnames: string[]): Promise<void>;
-  list(prefix: string): Promise<{ pathname: string; uploadedAt: Date }[]>;
+  /** One page of a cursor-paginated listing. */
+  list(prefix: string, page?: { cursor?: string; limit?: number }): Promise<{ blobs: { pathname: string; uploadedAt: Date }[]; cursor?: string; hasMore: boolean }>;
 }
 
 /**
@@ -67,9 +68,13 @@ export function vercelBlobStore(): BlobStore {
       if (pathnames.length) await del(pathnames);
     },
 
-    async list(prefix) {
-      const result = await list({ prefix, limit: 1000 });
-      return result.blobs.map((blob) => ({ pathname: blob.pathname, uploadedAt: new Date(blob.uploadedAt) }));
+    async list(prefix, page = {}) {
+      const result = await list({ prefix, cursor: page.cursor, limit: page.limit ?? 1000 });
+      return {
+        blobs: result.blobs.map((blob) => ({ pathname: blob.pathname, uploadedAt: new Date(blob.uploadedAt) })),
+        cursor: result.cursor,
+        hasMore: result.hasMore,
+      };
     },
   };
 }

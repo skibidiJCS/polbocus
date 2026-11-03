@@ -1,9 +1,10 @@
 import "server-only";
 import { vercelBlobStore } from "./blob-store";
 import { ServiceError } from "./errors";
+import { getSharedStore } from "./shared-store";
 import { createTwelveLabsProvider } from "./twelvelabs";
 import { memorySettings, type VideoProvider } from "./video-provider";
-import type { SessionDeps } from "./session";
+import { processDueSessions, type SessionDeps } from "./session";
 
 // Hosted mode keeps no database: index choice and option support are re-derived per instance.
 let cached: { key: string; provider: VideoProvider } | null = null;
@@ -17,7 +18,19 @@ export function getSessionDeps(): SessionDeps {
   if (cached?.key !== key) cached = { key, provider: createTwelveLabsProvider({ apiKey, settings, configuredIndexId: indexId }) };
   const blob = vercelBlobStore();
   if (!blob.configured()) throw new ServiceError("Vercel Blob is not connected to this project.", 503);
-  return { provider: cached.provider, blob };
+  const store = getSharedStore();
+  if (!store) throw new ServiceError("Vercel Blob is not connected to this project.", 503);
+  return { provider: cached.provider, blob, store };
 }
 
 export { settings as sessionSettings };
+
+// Visits also work through due cleanups, so abandoned sessions don't wait for the daily job.
+const OPPORTUNISTIC_EVERY_MS = 10 * 60_000;
+let lastOpportunistic = 0;
+
+export async function processDueOpportunistically(deps: SessionDeps) {
+  if (Date.now() - lastOpportunistic < OPPORTUNISTIC_EVERY_MS) return;
+  lastOpportunistic = Date.now();
+  await processDueSessions(deps, 10).catch((error) => console.warn("[session-cleanup] Opportunistic run failed", error instanceof Error ? error.message : error));
+}

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/lib/server/db";
 import { ProviderError } from "@/lib/server/video-provider";
 import { getVideo, insertQueuedVideo } from "@/lib/server/videos-repo";
+import { retryVideo } from "@/lib/server/video-service";
 import { createWorker, WORKER_LIMITS } from "@/lib/server/worker";
 import { fakeProvider } from "./fake-provider";
 import { tempDb, tempDir } from "./helpers";
@@ -160,5 +161,43 @@ describe("indexing worker", () => {
     });
     await runDue(worker(provider));
     expect(provider.deleteAsset).toHaveBeenCalledWith("orphan");
+  });
+
+  it("gives a retried indexing job a fresh timeout window without re-uploading or re-indexing", async () => {
+    addVideo();
+    let indexing: "in_progress" | "ready" = "in_progress";
+    const provider = fakeProvider({
+      getIndexedAsset: async () => (indexing === "ready" ? { status: "ready", durationSeconds: 30 } : { status: "in_progress", providerStatus: "indexing", durationSeconds: null }),
+    });
+    const w = worker(provider);
+    await runDue(w); // uploaded
+    advance(10_000);
+    await runDue(w); // indexing started
+    const firstStart = getVideo(db, "v1")!.indexingStartedAt;
+    expect(getVideo(db, "v1")).toMatchObject({ status: "indexing", providerTaskId: "ia1" });
+
+    // TwelveLabs is still indexing after 12 hours: the worker gives up.
+    advance(WORKER_LIMITS.indexingTimeoutMs + 60_000);
+    await runDue(w);
+    expect(getVideo(db, "v1")).toMatchObject({ status: "failed", error: expect.stringMatching(/12 hours/) });
+
+    // Retry while the provider still reports indexing: same job, new window.
+    await retryVideo(db, provider, "v1", () => clock);
+    const retried = getVideo(db, "v1")!;
+    expect(retried).toMatchObject({ status: "queued", providerAssetId: "asset1", providerTaskId: "ia1" });
+    expect(Date.parse(retried.indexingStartedAt!)).toBe(clock);
+    expect(db.prepare("SELECT indexing_first_started_at AS first FROM videos WHERE id = 'v1'").get()).toEqual({ first: firstStart });
+
+    advance(1_000);
+    await runDue(w);
+    expect(getVideo(db, "v1")).toMatchObject({ status: "indexing", error: null });
+    expect(job().next_attempt_at > new Date(clock).toISOString()).toBe(true); // still scheduled for polling
+
+    indexing = "ready";
+    advance(60_000);
+    await runDue(w);
+    expect(getVideo(db, "v1")).toMatchObject({ status: "ready", providerVideoId: "ia1" });
+    expect(provider.uploadAsset).toHaveBeenCalledTimes(1);
+    expect(provider.indexAsset).toHaveBeenCalledTimes(1);
   });
 });

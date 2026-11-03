@@ -50,7 +50,11 @@ export interface VideoProvider {
   /** TwelveLabs downloads the file from a public or presigned URL (videos up to 4 GB). */
   createAssetFromUrl(url: string, filename: string, signal?: AbortSignal): Promise<{ assetId: string }>;
   getAsset(assetId: string, signal?: AbortSignal): Promise<AssetState>;
-  listAssets(signal?: AbortSignal): Promise<{ id: string; filename: string | null; createdAt: string | null }[]>;
+  /** One page of assets, newest first. `filename` is TwelveLabs' case-insensitive partial match. */
+  listAssets(
+    query: { page: number; pageLimit: number; filename?: string },
+    signal?: AbortSignal,
+  ): Promise<{ items: { id: string; filename: string | null; createdAt: string | null }[]; totalPages: number | null }>;
   /** Indexed assets in `indexId` that reference `assetId` (to avoid indexing twice). */
   findIndexedAssets(assetId: string, indexId: string, signal?: AbortSignal): Promise<string[]>;
   indexAsset(indexId: string, assetId: string, signal?: AbortSignal): Promise<{ indexedAssetId: string }>;
